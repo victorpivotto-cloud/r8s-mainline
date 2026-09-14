@@ -1,0 +1,65 @@
+--- a/drivers/pci/controller/dwc/pci-exynos.c
++++ b/drivers/pci/controller/dwc/pci-exynos.c
+@@ -34,6 +34,14 @@
+ #define IRQ_INTB_ASSERT			BIT(2)
+ #define IRQ_INTC_ASSERT			BIT(4)
+ #define IRQ_INTD_ASSERT			BIT(6)
++/*
++ * Layout ELBI "host-v0" (o do Exynos 990): o pulso de MSI e o bit 29, tanto no
++ * status (0x000) quanto na habilitacao (0x00c). A Samsung nao usa este caminho
++ * — o device tree de fabrica traz use-msi = "false" e roda o Wi-Fi em INTx
++ * legado. Para o ath11k nao ha alternativa: ele exige MSI.
++ */
++#define IRQ_MSI_RISING_ASSERT		BIT(29)
++#define IRQ_MSI_CTRL_EN_RISING_EDG	BIT(29)
+ #define PCIE_IRQ_LEVEL			0x004
+ #define PCIE_IRQ_SPECIAL		0x008
+ #define PCIE_IRQ_EN_PULSE		0x00c
+@@ -262,25 +270,38 @@
+ 	return 0;
+ }
+ 
+-static void exynos_pcie_clear_irq_pulse(struct exynos_pcie *ep)
++static irqreturn_t exynos_pcie_irq_handler(int irq, void *arg)
+ {
+-	u32 val = exynos_pcie_readl(ep->elbi_base, PCIE_IRQ_PULSE);
++	struct exynos_pcie *ep = arg;
++	struct dw_pcie *pci = &ep->pci;
++	u32 mask;
++	u32 val;
+ 
++	val = exynos_pcie_readl(ep->elbi_base, PCIE_IRQ_PULSE);
+ 	exynos_pcie_writel(ep->elbi_base, val, PCIE_IRQ_PULSE);
+-}
+ 
+-static irqreturn_t exynos_pcie_irq_handler(int irq, void *arg)
+-{
+-	struct exynos_pcie *ep = arg;
++	if (val & IRQ_MSI_RISING_ASSERT) {
++		dw_handle_msi_irq(&pci->pp);
++
++		/*
++		 * Como faz o driver host-v0 da Samsung: mascarar o bloco de MSI
++		 * do DWC por um instante depois de limpar a borda no ELBI, para
++		 * que uma MSI que tenha chegado durante o atendimento volte a
++		 * ficar pendente em vez de se perder.
++		 */
++		mask = dw_pcie_readl_dbi(pci, PCIE_MSI_INTR0_MASK);
++		dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK, ~0);
++		dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK, mask);
++	}
+ 
+-	exynos_pcie_clear_irq_pulse(ep);
+-	return IRQ_HANDLED;
++	return val ? IRQ_HANDLED : IRQ_NONE;
+ }
+ 
+ static void exynos_pcie_enable_irq_pulse(struct exynos_pcie *ep)
+ {
+ 	u32 val = IRQ_INTA_ASSERT | IRQ_INTB_ASSERT |
+-		  IRQ_INTC_ASSERT | IRQ_INTD_ASSERT;
++		  IRQ_INTC_ASSERT | IRQ_INTD_ASSERT |
++		  IRQ_MSI_CTRL_EN_RISING_EDG;
+ 
+ 	exynos_pcie_writel(ep->elbi_base, val, PCIE_IRQ_EN_PULSE);
+ 	exynos_pcie_writel(ep->elbi_base, 0, PCIE_IRQ_EN_LEVEL);

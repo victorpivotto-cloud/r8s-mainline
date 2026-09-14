@@ -1,0 +1,513 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Samsung Galaxy S20 FE (r8s / SM-G780F) — device tree para uso HEADLESS
+ *
+ * RASCUNHO NÃO COMPILADO E NÃO TESTADO — 2026-09-13.
+ * Montado a partir de três fontes, todas verificadas:
+ *   1. arch/arm64/boot/dts/exynos/exynos990-r8s.dts do mainline (mapa de
+ *      memória do r8s, framebuffer 1080x2400, teclas) — é a base correta;
+ *   2. kernel/dts/exynos990-z3s.dts do porte z3s (s2mpu, pcie, ufs vcc) —
+ *      o que o mainline não tem;
+ *   3. o DTB DE ESTOQUE DO PRÓPRIO r8s, extraído do firmware de rollback
+ *      (AP → boot.img → dt_table → r8s-estoque.dtb), que é quem confirma
+ *      que os GPIOs de placa do z3s valem aqui.
+ *
+ * GPIOs conferidos no DTB de estoque do r8s (não copiados no escuro):
+ *   cnss_wlan_en  = gpb0-4   (z3s: wlan_power = gpb0 4)      → IGUAL
+ *   pcie0_perst   = gpf0-1   (z3s: reset-gpios = gpf0 1)     → IGUAL
+ *   pcie0_clkreq  = gpf0-0                                   → IGUAL
+ *   ufs vcc       = gpg1-0   (z3s: ufs_vcc_reg = gpg1 0)     → IGUAL
+ *   teclas        = gpa2-4 / gpa0-4 / gpa0-3                 → IGUAL
+ *
+ * DIFERENÇA QUE NÃO TRANSFERE: o Wi-Fi. O z3s é Broadcom BCM4375 e usa um
+ * brcmfmac portado. O r8s é QUALCOMM QCA6390 — o nó filho do PCIe tem que
+ * ser ath11k (mainline), com o firmware extraído de /vendor/firmware/qca6390.
+ */
+
+/dts-v1/;
+#include "exynos990.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	model = "Samsung Galaxy S20 FE (headless)";
+	compatible = "samsung,r8s", "samsung,exynos990";
+
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * root=/dev/sda32 é a USERDATA deste aparelho — confirmado com o
+		 * Android de fábrica montando /data em /dev/block/sda32 (227 GB).
+		 * Na fase 1 isso vai ser trocado pelo microSD, que foi o primeiro
+		 * root que funcionou no z3s.
+		 */
+		bootargs = "console=tty0 quiet loglevel=0 clk_ignore_unused maxcpus=1 nmi_watchdog=0 nosoftlockup";
+
+		framebuffer0: framebuffer@f1000000 {
+			compatible = "simple-framebuffer";
+			reg = <0 0xf1000000 0 (1080 * 2400 * 4)>;
+			width = <1080>;
+			height = <2400>;
+			stride = <(1080 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	/*
+	 * MAPA DE MEMÓRIA — NÃO usar o do z3s (12/16 GB): mapa errado não dá
+	 * erro educado, dá corrupção.
+	 *
+	 * ACHADO 13/09: o DTB de ESTOQUE deste aparelho não tem nó de memória
+	 * nenhum — o S-Boot INJETA o mapa em tempo de boot. O /proc/device-tree
+	 * do aparelho vivo mostra 16 nós, e na região alta são 12, de
+	 * memory@880000000 a memory@9e0000000, espaçados 0x20000000 (512 MiB):
+	 * 12 x 512 MiB = 6 GiB, terminando em 0xa00000000.
+	 *
+	 * O exynos990-r8s.dts do mainline declara só <0x8 0x80000000 0x0
+	 * 0xc0000000> = 3 GiB nessa região, ou seja SUBDECLARA ~3 GiB. Com ele
+	 * o total fecha 4,875 GiB, e este aparelho tem MemTotal 7.653.524 kB.
+	 * Num servidor que vai gravar câmera, jogar fora 1/3 da RAM não é
+	 * detalhe.
+	 *
+	 * O tamanho de 512 MiB por nó é INFERIDO do espaçamento (o SELinux nega
+	 * a leitura das propriedades sem root). A aritmética fecha: 6 GiB +
+	 * ~1,3 GiB da região baixa ~= o MemTotal medido, com o resto em
+	 * carveout. VERIFICAR NO PRIMEIRO BOOT: se /proc/meminfo do mainline
+	 * não bater, voltar para o valor conservador do upstream, que está
+	 * comentado abaixo.
+	 *
+	 * COMPILADO E CONFERIDO 13/09: o .dtb gerado declara 7,875 GiB contra os
+	 * 4,875 GiB do upstream. O MemTotal medido é 7,300 GiB — a diferença de
+	 * 0,575 GiB é carveout reservado, que é exatamente o esperado.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x3ab00000>,
+		      <0x0 0xc1200000 0x0 0x1ee00000>,
+		      <0x0 0xe1900000 0x0 0x1e700000>,
+		      /* upstream, conservador: <0x8 0x80000000 0x0 0xc0000000> */
+		      <0x8 0x80000000 0x0 0xc0000000>;  /* VARIANTE B: mapa conservador do upstream */
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		cont_splash_mem: framebuffer@f1000000 {
+			reg = <0 0xf1000000 0 0x13c6800>;
+			no-map;
+		};
+
+		ramoops@f0000000 {
+			compatible = "ramoops";
+			reg = <0 0xf0000000 0 0x100000>;
+			console-size = <0x80000>;
+			record-size = <0x20000>;
+			pmsg-size = <0x20000>;
+			ecc = <0>;
+		};
+
+		/*
+		 * O EL2 da Samsung é dono desta tabela e a atualiza por
+		 * HVC_FID_SET_S2MPU_FOR_WIFI. Deixar estas páginas no alocador
+		 * do Linux corrompe as permissões de DMA do PCIe.
+		 */
+		s2mpu_table: s2mpu-table@c1800000 {
+			compatible = "exynos,s2mpu_table";
+			reg = <0 0xc1800000 0 0x300000>;
+			no-map;
+		};
+	};
+
+	s2mpu {
+		compatible = "samsung,exynos-s2mpu";
+		instance-num = <34>;
+		instance-names = "aud", "csis_d0", "csis_d1",
+				 "dpu0", "dpu1", "dpu2", "ipp",
+				 "tnr_d0", "tnr_d1", "dns",
+				 "mcsc_d0", "mcsc_d1",
+				 "g2d_d0", "g2d_d1", "g2d_d2",
+				 "dnc_d0", "dnc_d1", "dnc_d2",
+				 "dnc_d3", "dnc_d4", "vra",
+				 "mfc_d0", "mfc_d1",
+				 "hsi0", "hsi1", "hsi2",
+				 "acvps", "secu", "dit", "sbic",
+				 "g3d0", "g3d1", "g3d2", "g3d3";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&key_power &key_voldown &key_volup>;
+		pinctrl-names = "default";
+
+		power-key {
+			label = "Power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpa2 4 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+		};
+		voldown-key {
+			label = "Volume Down";
+			linux,code = <KEY_VOLUMEDOWN>;
+			gpios = <&gpa0 4 GPIO_ACTIVE_LOW>;
+		};
+		volup-key {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&gpa0 3 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+
+	/*
+	 * PCIe HSI1 — no estoque vem status="disabled" e é ligado por overlay.
+	 * Endereços, ranges, num-lanes e max-link-speed conferem byte a byte
+	 * com o nó do z3s; o reset em gpf0-1 também.
+	 */
+	pcie_wifi: pcie@133b0000 {
+		compatible = "samsung,exynos990-pcie";
+		reg = <0x0 0x133b0000 0x0 0x1000>,
+		      <0x0 0x133e0000 0x0 0x1000>,
+		      <0x0 0x133f0000 0x0 0x1000>,
+		      <0x0 0x133d0000 0x0 0x01fc>,
+		      <0x0 0x11ffe000 0x0 0x2000>,
+		      <0x0 0x13000000 0x0 0x4000>;
+		reg-names = "elbi", "phy", "dbi", "pcs", "config", "cmu";
+		interrupts = <GIC_SPI 314 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "pcie";
+		#interrupt-cells = <1>;
+		interrupt-map-mask = <0x0 0x0 0x0 0x0>;
+		interrupt-map = <0x0 0x0 0x0 0x0
+				 &gic GIC_SPI 314 IRQ_TYPE_LEVEL_HIGH>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		device_type = "pci";
+		linux,pci-domain = <0>;
+		bus-range = <0x00 0xff>;
+		ranges = <0x82000000 0x0 0x11000000
+			  0x0 0x11000000
+			  0x0 0x00ff0000>;
+		num-lanes = <1>;
+		max-link-speed = <1>;
+		reset-gpios = <&gpf0 1 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pcie0_clkreq &pcie0_perst>;
+		clocks = <&cmu_top CLK_GOUT_CMU_HSI1_PCIE>;
+		clock-names = "pcie";
+		samsung,sysreg = <&sysreg_hsi1>;
+		samsung,pmu = <&pmu_system_controller>;
+		vpcie-supply = <&wlan_power>;
+		status = "okay";
+
+	};
+
+	/* gpg1-0, confirmado como 'ufs-vcc' no fixedregulator@0 do estoque */
+	ufs_vcc_reg: regulator-ufs-vcc {
+		compatible = "regulator-fixed";
+		regulator-name = "ufs-vcc";
+		gpio = <&gpg1 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+};
+
+&oscclk {
+	clock-frequency = <26000000>;
+};
+
+&pinctrl_alive {
+	key_power: key-power-pins {
+		samsung,pins = "gpa2-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+	key_voldown: key-voldown-pins {
+		samsung,pins = "gpa0-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+	key_volup: key-volup-pins {
+		samsung,pins = "gpa0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	/*
+	 * Pino de interrupcao do toque. SEM ISTO o request_irq falha com -22:
+	 * gpa1 e um interrupt-controller valido, mas o pino precisa estar em
+	 * funcao EINT para a linha existir. O estoque declara exatamente assim
+	 * (attn-irq: gpa1-0, pin-function 0xf = EXYNOS_PIN_FUNC_EINT).
+	 */
+	tsp_attn_irq: tsp-attn-irq-pins {
+		samsung,pins = "gpa1-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+};
+
+/*
+ * FASE 1: peripheral, porque o gadget USB (RNDIS + ACM) é o console de
+ * resgate — é por ele que se entra quando o Wi-Fi não sobe.
+ *
+ * ATENÇÃO, MUDA NA FASE 3: o destino final deste aparelho exige dr_mode =
+ * "host", senão o hub com a NIC Ethernet e o SSD de vídeo não funcionam.
+ * Os dois não coexistem sem OTG/role-switch; trocar só depois de ter outra
+ * via de acesso comprovada.
+ */
+&usbdrd_dwc3 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	snps,dis_u2_susphy_quirk;
+	snps,dis_enblslpm_quirk;
+};
+
+&ufs_0 {
+	vcc-supply = <&ufs_vcc_reg>;
+};
+
+/*
+ * microSD.
+ *
+ * ATENCAO: so habilitar COM CARTAO INSERIDO. O no usa 'broken-cd' (o pino de
+ * deteccao do z3s oscila sob carga e provoca reinicializacao em laco), entao
+ * sem cartao o controlador entra em timeout repetido, soterra o console e
+ * atrapalha o resto do boot. Foi por isso que ficou desligado ate 14/09.
+ *
+ * Para desligar de novo: status = "disabled".
+ */
+&mmc_2 {
+	/*
+	 * 50 MHz, nao os 25 do dtsi.
+	 *
+	 * O teto de 25 MHz veio do porte do z3s junto com o 'broken-cd' — era
+	 * correcao de instabilidade DELES. MEDIDO no r8s em 14/09: a 50 MHz
+	 * pedidos o barramento sobe de 20,15 para 33,58 MHz reais (o divisor e
+	 * inteiro: 201,5 / 2*3), com ZERO erros de mmc, e a leitura sobe ~30%.
+	 *
+	 * Nao adianta pedir mais: o nucleo do MMC limita o clock a capacidade que
+	 * o CARTAO declara, e em SD high-speed isso e 50 MHz. Pedir 50,375 deu
+	 * exatamente o mesmo 33,58. Passar disso exige UHS (SDR50/SDR104), que
+	 * precisa comutar o vqmmc para 1,8 V — hoje impossivel, porque os trilhos
+	 * sao fixos em 2,95 V (ver exynos990-sd-rails.c).
+	 */
+	max-frequency = <50000000>;
+	status = "okay";
+};
+
+/*
+ * S2DOS05 e o touchscreen S6SY761 DESLIGADOS neste aparelho.
+ *
+ * Os dois vem do dtsi do z3s, que os colocou no nivel de SoC — mas sao
+ * board-level, e o r8s NAO os tem. Prova, lida do dtbo.img de estoque do
+ * proprio r8s: aqui o toque e 'zinitix,zt_ts_device' @0x20 (ou
+ * 'stm,fts_touch' @0x49, conforme a unidade), alimentado por um
+ * regulator-fixed por GPIO chamado 'tsp_ldo_en' — nao por sub-PMIC nenhum.
+ *
+ * Efeito pratico: some o erro que aparecia todo boot,
+ *   s2dos05-regulator 1-0060: error -ETIMEDOUT: S2DOS05 not responding
+ * que era eu procurando um chip que nao existe nesta placa.
+ */
+&s2dos05 {
+	status = "disabled";
+};
+
+/*
+ * TOQUE do r8s. Tudo lido do dtbo.img de estoque deste aparelho:
+ *   barramento .... hsi2c_15 (fixups: hsi2c_15 = '/fragment@50:target:0')
+ *   pinos I2C ..... gpp5-6 / gpp5-7  (tspi2c-bus)
+ *   interrupcao ... gpa1-0           (attn-irq)
+ *   alimentacao ... regulator-fixed 'tsp_ldo_en' em gpm21, 3,0 V, ativo alto
+ *   chip .......... zinitix zt7650 @0x20. MEDIDO com i2cdetect no aparelho:
+ *                   so 0x20 responde no barramento; o ST fts5cu56a @0x49 que o
+ *                   estoque tambem declara NAO existe nesta unidade. Deixar os
+ *                   dois nos quebrava o pinctrl, porque dois donos disputavam
+ *                   o mesmo pino gpa1-0 ('Error applying setting').
+ *
+ * Diferenca importante em relacao ao z3s: la o toque dependia do sub-PMIC
+ * S2DOS05 (que este aparelho NAO tem). Aqui e um LDO simples por GPIO.
+ *
+ * RESSALVA: o driver zinitix do mainline nao lista 'zt7650'. Amarramos como
+ * 'zinitix,bt541', que e da mesma familia de protocolo — e uma APOSTA, e o
+ * probe dira se cola. O ST tem 'st,stmfts' de verdade no mainline.
+ */
+/ {
+	tsp_ldo_en: regulator-tsp {
+		compatible = "regulator-fixed";
+		regulator-name = "tsp_ldo_en";
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3000000>;
+		gpio = <&gpm21 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+};
+
+/* o s6sy761 e do z3s; este aparelho nao tem esse chip */
+&hsi2c_15 {
+	status = "okay";
+
+	touchscreen@20 {
+		compatible = "zinitix,bt541";
+		reg = <0x20>;
+		interrupt-parent = <&gpa1>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;  /* como o z3s: EDGE_FALLING dava -22 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&tsp_attn_irq>;
+		vdd-supply = <&tsp_ldo_en>;
+		vddo-supply = <&tsp_ldo_en>;
+		touchscreen-size-x = <1080>;
+		touchscreen-size-y = <2400>;
+		status = "okay";
+	};
+
+};
+
+/*
+ * QCA6390 (Wi-Fi + Bluetooth) pelo caminho que o kernel ja tem pronto:
+ *   drivers/power/sequencing/pwrseq-qcom-wcn.c   "qcom,qca6390-pmu"
+ *   drivers/pci/pwrctl/pci-pwrctl-pwrseq.c       "pci17cb,1101"
+ *
+ * Eu estava ligando trilho e GPIO na mao e esperando o link treinar. O chip
+ * exige SEQUENCIA e tempos, e e isso que o pwrseq faz. Molde: o DTS do
+ * naughtyGitCat/armbian-oneplus-kebab, que roda QCA6390 em mainline.
+ *
+ * ALIMENTACAO neste aparelho: dos 8 trilhos que o chip pede, **7 ja sao
+ * `always-on` no PMIC** (verificado: das 16 BUCKs do s2mps19, BUCK4M e a UNICA
+ * que nao e always-on). Entao eles sao declarados aqui como regulator-fixed —
+ * nao porque sejam falsos, mas porque ja estao energizados e o que falta ao
+ * kernel e apenas um consumidor para o pwrseq segurar.
+ *
+ * O de 0,95 V (BUCK4M) esta ligado por escrita direta no PMIC via ACPM
+ * (CTRL 0x3d=0xd8, OUT 0x3e=0x50), que PERSISTE entre boots. Enquanto nao
+ * houver driver de regulador para o S2MPS19, e assim.
+ */
+/ {
+	/*
+	 * O que garante a ORDEM: com vpcie-supply, o driver do PCIe habilita
+	 * este regulador ANTES de treinar o link. Foi assim na primeira
+	 * tentativa — o que estava errado la era a TENSAO do BUCK4M (0,45 V,
+	 * porque eu so tinha escrito o CTRL e nao o OUT). Agora o trilho esta
+	 * em 0,95 V e persiste entre boots.
+	 */
+	wlan_power: regulator-wlan {
+		compatible = "regulator-fixed";
+		regulator-name = "wlan-enable";
+		gpio = <&gpb0 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+		startup-delay-us = <20000>;
+	};
+
+	r8s_vreg_0p95: regulator-wcn-0p95 {
+		compatible = "regulator-fixed";
+		regulator-name = "wcn-0p95";       /* BUCK4M, ligado via ACPM */
+		regulator-min-microvolt = <950000>;
+		regulator-max-microvolt = <950000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+	r8s_vreg_1p3: regulator-wcn-1p3 {
+		compatible = "regulator-fixed";
+		regulator-name = "wcn-1p3";
+		regulator-min-microvolt = <1300000>;
+		regulator-max-microvolt = <1300000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+	r8s_vreg_1p9: regulator-wcn-1p9 {
+		compatible = "regulator-fixed";
+		regulator-name = "wcn-1p9";
+		regulator-min-microvolt = <1900000>;
+		regulator-max-microvolt = <1900000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+	r8s_vreg_1p8: regulator-wcn-1p8 {
+		compatible = "regulator-fixed";
+		regulator-name = "wcn-1p8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+};
+
+&pcie_wifi {
+	/*
+	 * NAO redeclarar 'ranges' aqui. Um 'ranges;' VAZIO substitui a janela de
+	 * memoria que o no original declara (0x11000000, ~16 MB), e o BAR de 1 MB
+	 * do QCA6390 fica sem onde caber:
+	 *   non-prefetchable memory resource required
+	 *   bridge window [mem size 0x00100000]: can't assign; no space
+	 * O link ja treinava; era so isso que faltava.
+	 */
+	#address-cells = <3>;
+	#size-cells = <2>;
+
+	pcieport0: pcie@0,0 {
+		device_type = "pci";
+		reg = <0x0 0x0 0x0 0x0 0x0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges;
+		bus-range = <0x01 0xff>;
+
+		wifi@0,0 {
+			compatible = "pci17cb,1101";
+			reg = <0x10000 0x0 0x0 0x0 0x0>;
+			qcom,ath11k-calibration-variant = "Samsung-r8s";
+
+		};
+	};
+};
+
+/*
+ * RTC. Sem ele o aparelho acorda com a hora zerada a cada boot — o que ja
+ * custou caro hoje: o apt recusou as assinaturas do repositorio com
+ * "Not live until ...", porque o relogio estava em abril.
+ *
+ * O DT de estoque tem `rtc@15920000` com `samsung,exynos8-rtc`; o mainline
+ * atende o mesmo bloco pelo `samsung,s3c6410-rtc` (rtc-s3c.c, ja =y na config).
+ * IRQs 47 e 48, lidas do estoque (0x2f, 0x30).
+ *
+ * Os clocks: o driver exige "rtc" e "rtc_src" (s3c6410_rtc_data tem
+ * needs_src_clk = true) e a nossa arvore nao expoe o gate do CMU. Como o
+ * bootloader JA usa o RTC, o gate de hardware esta ligado; entao aqui os dois
+ * sao fixed-clock, que dao ao driver um objeto para habilitar sem mexer em
+ * hardware. Se algum dia o clk-exynos990 expuser o gate real, trocar por ele.
+ */
+/ {
+	rtcclk: clock-rtc {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <32768>;
+		clock-output-names = "rtcclk";
+	};
+};
+
+&soc {
+	rtc: rtc@15920000 {
+		compatible = "samsung,s3c6410-rtc";
+		reg = <0x15920000 0x100>;
+		interrupts = <GIC_SPI 47 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&rtcclk>, <&rtcclk>;
+		clock-names = "rtc", "rtc_src";
+		status = "okay";
+	};
+};

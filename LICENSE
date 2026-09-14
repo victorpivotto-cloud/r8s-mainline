@@ -1,0 +1,8 @@
+SPDX-License-Identifier: GPL-2.0-only
+
+Kernel patches and drivers here derive from the Linux kernel and are
+GPL-2.0-only. The scripts and documentation are released under the same terms
+for simplicity.
+
+This work builds on the exynos990-mainline project and on the z3s port, both
+GPL-2.0-only. Their material is linked, not redistributed here.

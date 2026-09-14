@@ -1,0 +1,324 @@
+diff --git a/drivers/pci/controller/dwc/pci-exynos.c b/drivers/pci/controller/dwc/pci-exynos.c
+index 6a830166d..37c1aa3f5 100644
+--- a/drivers/pci/controller/dwc/pci-exynos.c
++++ b/drivers/pci/controller/dwc/pci-exynos.c
+@@ -11,6 +11,7 @@
+ 
+ #include <linux/clk.h>
+ #include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
+ #include <linux/init.h>
+@@ -20,6 +21,8 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/module.h>
++#include <linux/mfd/syscon.h>
++#include <linux/regmap.h>
+ 
+ #include "pcie-designware.h"
+ 
+@@ -31,6 +34,14 @@
+ #define IRQ_INTB_ASSERT			BIT(2)
+ #define IRQ_INTC_ASSERT			BIT(4)
+ #define IRQ_INTD_ASSERT			BIT(6)
++/*
++ * Layout ELBI "host-v0" (o do Exynos 990): o pulso de MSI e o bit 29, tanto no
++ * status (0x000) quanto na habilitacao (0x00c). A Samsung nao usa este caminho
++ * — o device tree de fabrica traz use-msi = "false" e roda o Wi-Fi em INTx
++ * legado. Para o ath11k nao ha alternativa: ele exige MSI.
++ */
++#define IRQ_MSI_RISING_ASSERT		BIT(29)
++#define IRQ_MSI_CTRL_EN_RISING_EDG	BIT(29)
+ #define PCIE_IRQ_LEVEL			0x004
+ #define PCIE_IRQ_SPECIAL		0x008
+ #define PCIE_IRQ_EN_PULSE		0x00c
+@@ -54,11 +65,131 @@
+ struct exynos_pcie {
+ 	struct dw_pcie			pci;
+ 	void __iomem			*elbi_base;
++	void __iomem			*phy_base;
++	void __iomem			*pcs_base;
++	void __iomem			*cmu_base;
++	struct regmap			*sysreg;
++	struct regmap			*pmu;
+ 	struct clk_bulk_data		*clks;
+ 	struct phy			*phy;
++	struct gpio_desc		*perst;
++	bool				is_exynos990;
+ 	struct regulator_bulk_data	supplies[2];
+ };
+ 
++/* Exynos9830/990 HSI1 CMU local gates used by the Gen2 x1 controller. */
++#define HSI1_PCIE_MUX_USER		0x0620
++#define HSI1_PCIE_REF_GATE		0x2000
++#define HSI1_PCIE_DBI_GATE		0x2024
++#define HSI1_PCIE_PHY_APB_GATE		0x2028
++#define HSI1_PCIE_MSTR_GATE		0x202c
++#define HSI1_PCIE_CTRL_APB_GATE		0x2030
++#define HSI1_PCIE_PCS_APB_GATE		0x2034
++#define HSI1_PCIE_SLV_GATE		0x2038
++#define EXYNOS990_CLK_GATE_ENABLE	BIT(21)
++#define EXYNOS990_PCIE_PHY_CONTROL	0x0718
++#define EXYNOS990_PCIE_SOFT_CORE_RESET	0x01d0
++#define EXYNOS990_PCIE_QCH_SEL		0x02c8
++
++static void exynos990_hsi1_gate(struct exynos_pcie *ep, u32 reg)
++{
++	u32 val = readl(ep->cmu_base + reg);
++
++	writel(val | EXYNOS990_CLK_GATE_ENABLE, ep->cmu_base + reg);
++}
++
++static void exynos990_pcie_enable_clocks(struct exynos_pcie *ep)
++{
++	u32 val;
++
++	/* Select the CLKCMU_HSI1_PCIE parent and ungate every Gen2 path. */
++	val = readl(ep->cmu_base + HSI1_PCIE_MUX_USER);
++	writel(val | BIT(4), ep->cmu_base + HSI1_PCIE_MUX_USER);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_REF_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_DBI_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_PHY_APB_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_MSTR_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_CTRL_APB_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_PCS_APB_GATE);
++	exynos990_hsi1_gate(ep, HSI1_PCIE_SLV_GATE);
++}
++
++static void exynos990_pcie_phy_init(struct exynos_pcie *ep)
++{
++	static const u32 cmn[] = {
++		0x01, 0xe1, 0x05, 0x00, 0x88, 0x88, 0x88, 0x0c,
++		0x71, 0x45, 0x65, 0x24, 0x33, 0x18, 0xe3, 0xfc,
++		0xd8, 0x05, 0xe6, 0x80, 0x00, 0x00, 0x00, 0x00,
++		0x60, 0x11, 0x00, 0xa0, 0x05, 0x04, 0x18, 0x88,
++		0xc0, 0xff, 0x9b, 0x52, 0x22, 0x30, 0x4f, 0xdc,
++		0x40, 0x00, 0x00, 0x00, 0x00, 0x0b, 0x00, 0x80,
++	};
++	static const u32 trsv[] = {
++		0x31, 0x40, 0x37, 0x99, 0x85, 0x00, 0xc0, 0xff,
++		0xff, 0x3f, 0x8c, 0xc8, 0x02, 0x01, 0x88, 0x80,
++		0x06, 0x90, 0x6c, 0x66, 0x09, 0x61, 0x42, 0x44,
++		0xc6, 0x50, 0x0a, 0x33, 0x58, 0xe7, 0x20, 0x22,
++		0x80, 0x38, 0x05, 0x85, 0x00, 0x00, 0x00, 0x7e,
++		0x00, 0x00, 0x55, 0x15, 0xac, 0xaa, 0x3e, 0x00,
++		0x00, 0x00, 0x20, 0x3f, 0x00, 0x03, 0x40, 0x00,
++		0x10, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
++		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
++		0x05, 0x85, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
++	};
++	u32 val;
++	int i;
++
++	/* PHY power and lane-0 routing, copied from Samsung's Exynos9830 BSP. */
++	regmap_update_bits(ep->pmu, EXYNOS990_PCIE_PHY_CONTROL, BIT(0), BIT(0));
++	regmap_read(ep->sysreg, 0, &val);
++	regmap_write(ep->sysreg, 0, val | BIT(1));
++	regmap_read(ep->sysreg, 0xc, &val);
++	val &= ~GENMASK(7, 2);
++	val |= 0x3 << 2;
++	val &= ~BIT(1);
++	val |= BIT(12);
++	regmap_write(ep->sysreg, 0xc, val);
++
++	/* BCM4375 PCS global reset. */
++	writel(1, ep->elbi_base + 0x288);
++	udelay(10);
++	writel(0, ep->elbi_base + 0x288);
++	udelay(10);
++	writel(1, ep->elbi_base + 0x288);
++	udelay(10);
++
++	for (i = 0; i < ARRAY_SIZE(cmn); i++)
++		writel(cmn[i], ep->phy_base + i * 4);
++	for (i = 0; i < ARRAY_SIZE(trsv); i++)
++		writel(trsv[i], ep->phy_base + (0x30 + i) * 4);
++
++	writel(0x70, ep->pcs_base + 0xf8);
++	writel(0x87, ep->pcs_base + 0x100);
++	writel(0x50, ep->pcs_base + 0x104);
++	val = readl(ep->pcs_base + 0x0c);
++	writel((val & ~BIT(1)) | BIT(4), ep->pcs_base + 0x0c);
++
++	/* MAC, common PHY and CDR reset sequence for Broadcom Wi-Fi. */
++	writel(1, ep->elbi_base + 0x290);
++	udelay(10);
++	writel(0, ep->elbi_base + 0x290);
++	udelay(10);
++	writel(1, ep->elbi_base + 0x290);
++	udelay(10);
++	writel(1, ep->elbi_base + 0x28c);
++	udelay(10);
++	writel(0, ep->elbi_base + 0x28c);
++	udelay(10);
++	writel(1, ep->elbi_base + 0x28c);
++	udelay(100);
++	val = readl(ep->pcs_base + 0xd0);
++	writel(val | (0x3 << 6), ep->pcs_base + 0xd0);
++	udelay(20);
++	val = readl(ep->pcs_base + 0xd0) & ~(0x3 << 6);
++	writel(val | (0x2 << 6), ep->pcs_base + 0xd0);
++	writel(val, ep->pcs_base + 0xd0);
++}
++
+ static void exynos_pcie_writel(void __iomem *base, u32 val, u32 reg)
+ {
+ 	writel(val, base + reg);
+@@ -123,6 +254,12 @@ static int exynos_pcie_start_link(struct dw_pcie *pci)
+ 	struct exynos_pcie *ep = to_exynos_pcie(pci);
+ 	u32 val;
+ 
++	if (ep->is_exynos990) {
++		/* Keep PERST asserted during PHY setup, then meet BCM's delay. */
++		gpiod_set_value_cansleep(ep->perst, 0);
++		usleep_range(18000, 20000);
++	}
++
+ 	val = exynos_pcie_readl(ep->elbi_base, PCIE_SW_WAKE);
+ 	val &= ~PCIE_BUS_EN;
+ 	exynos_pcie_writel(ep->elbi_base, val, PCIE_SW_WAKE);
+@@ -133,25 +270,38 @@ static int exynos_pcie_start_link(struct dw_pcie *pci)
+ 	return 0;
+ }
+ 
+-static void exynos_pcie_clear_irq_pulse(struct exynos_pcie *ep)
++static irqreturn_t exynos_pcie_irq_handler(int irq, void *arg)
+ {
+-	u32 val = exynos_pcie_readl(ep->elbi_base, PCIE_IRQ_PULSE);
++	struct exynos_pcie *ep = arg;
++	struct dw_pcie *pci = &ep->pci;
++	u32 mask;
++	u32 val;
+ 
++	val = exynos_pcie_readl(ep->elbi_base, PCIE_IRQ_PULSE);
+ 	exynos_pcie_writel(ep->elbi_base, val, PCIE_IRQ_PULSE);
+-}
+ 
+-static irqreturn_t exynos_pcie_irq_handler(int irq, void *arg)
+-{
+-	struct exynos_pcie *ep = arg;
++	if (val & IRQ_MSI_RISING_ASSERT) {
++		dw_handle_msi_irq(&pci->pp);
++
++		/*
++		 * Como faz o driver host-v0 da Samsung: mascarar o bloco de MSI
++		 * do DWC por um instante depois de limpar a borda no ELBI, para
++		 * que uma MSI que tenha chegado durante o atendimento volte a
++		 * ficar pendente em vez de se perder.
++		 */
++		mask = dw_pcie_readl_dbi(pci, PCIE_MSI_INTR0_MASK);
++		dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK, ~0);
++		dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK, mask);
++	}
+ 
+-	exynos_pcie_clear_irq_pulse(ep);
+-	return IRQ_HANDLED;
++	return val ? IRQ_HANDLED : IRQ_NONE;
+ }
+ 
+ static void exynos_pcie_enable_irq_pulse(struct exynos_pcie *ep)
+ {
+ 	u32 val = IRQ_INTA_ASSERT | IRQ_INTB_ASSERT |
+-		  IRQ_INTC_ASSERT | IRQ_INTD_ASSERT;
++		  IRQ_INTC_ASSERT | IRQ_INTD_ASSERT |
++		  IRQ_MSI_CTRL_EN_RISING_EDG;
+ 
+ 	exynos_pcie_writel(ep->elbi_base, val, PCIE_IRQ_EN_PULSE);
+ 	exynos_pcie_writel(ep->elbi_base, 0, PCIE_IRQ_EN_LEVEL);
+@@ -214,6 +364,11 @@ static int exynos_pcie_link_up(struct dw_pcie *pci)
+ 	struct exynos_pcie *ep = to_exynos_pcie(pci);
+ 	u32 val = exynos_pcie_readl(ep->elbi_base, PCIE_ELBI_RDLH_LINKUP);
+ 
++	if (ep->is_exynos990) {
++		val &= 0x1f;
++		return val >= 0x0d && val <= 0x14;
++	}
++
+ 	return (val & PCIE_ELBI_XMLH_LINKUP);
+ }
+ 
+@@ -224,6 +379,22 @@ static int exynos_pcie_host_init(struct dw_pcie_rp *pp)
+ 
+ 	pp->bridge->ops = &exynos_pci_ops;
+ 
++	if (ep->is_exynos990) {
++		gpiod_set_value_cansleep(ep->perst, 1);
++		exynos990_pcie_enable_clocks(ep);
++		exynos990_pcie_phy_init(ep);
++		/* Samsung establishes a clean DWC core after PHY calibration. */
++		writel(0, ep->elbi_base + EXYNOS990_PCIE_SOFT_CORE_RESET);
++		udelay(20);
++		writel(1, ep->elbi_base + EXYNOS990_PCIE_SOFT_CORE_RESET);
++		/* Keep AXI/APB/PMU clocks ungated during initial link training. */
++		writel(readl(ep->elbi_base + EXYNOS990_PCIE_QCH_SEL) &
++		       ~GENMASK(11, 0),
++		       ep->elbi_base + EXYNOS990_PCIE_QCH_SEL);
++		exynos_pcie_enable_irq_pulse(ep);
++		return 0;
++	}
++
+ 	exynos_pcie_assert_core_reset(ep);
+ 
+ 	phy_init(ep->phy);
+@@ -290,10 +461,8 @@ static int exynos_pcie_probe(struct platform_device *pdev)
+ 
+ 	ep->pci.dev = dev;
+ 	ep->pci.ops = &dw_pcie_ops;
+-
+-	ep->phy = devm_of_phy_get(dev, np, NULL);
+-	if (IS_ERR(ep->phy))
+-		return PTR_ERR(ep->phy);
++	ep->is_exynos990 = of_device_is_compatible(np,
++						   "samsung,exynos990-pcie");
+ 
+ 	/* External Local Bus interface (ELBI) registers */
+ 	ep->elbi_base = devm_platform_ioremap_resource_byname(pdev, "elbi");
+@@ -304,6 +473,38 @@ static int exynos_pcie_probe(struct platform_device *pdev)
+ 	if (ret < 0)
+ 		return ret;
+ 
++	if (ep->is_exynos990) {
++		ep->phy_base =
++			devm_platform_ioremap_resource_byname(pdev, "phy");
++		if (IS_ERR(ep->phy_base))
++			return PTR_ERR(ep->phy_base);
++		ep->pcs_base =
++			devm_platform_ioremap_resource_byname(pdev, "pcs");
++		if (IS_ERR(ep->pcs_base))
++			return PTR_ERR(ep->pcs_base);
++		ep->sysreg = syscon_regmap_lookup_by_phandle(np,
++							    "samsung,sysreg");
++		if (IS_ERR(ep->sysreg))
++			return PTR_ERR(ep->sysreg);
++		ep->cmu_base =
++			devm_platform_ioremap_resource_byname(pdev, "cmu");
++		if (IS_ERR(ep->cmu_base))
++			return PTR_ERR(ep->cmu_base);
++		ep->pmu = syscon_regmap_lookup_by_phandle(np, "samsung,pmu");
++		if (IS_ERR(ep->pmu))
++			return PTR_ERR(ep->pmu);
++		ep->perst = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++		if (IS_ERR(ep->perst))
++			return dev_err_probe(dev, PTR_ERR(ep->perst),
++					     "failed to get PERST GPIO\n");
++		platform_set_drvdata(pdev, ep);
++		return exynos_add_pcie_port(ep, pdev);
++	}
++
++	ep->phy = devm_of_phy_get(dev, np, NULL);
++	if (IS_ERR(ep->phy))
++		return PTR_ERR(ep->phy);
++
+ 	ep->supplies[0].supply = "vdd18";
+ 	ep->supplies[1].supply = "vdd10";
+ 	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ep->supplies),
+@@ -378,6 +579,7 @@ static const struct dev_pm_ops exynos_pcie_pm_ops = {
+ 
+ static const struct of_device_id exynos_pcie_of_match[] = {
+ 	{ .compatible = "samsung,exynos5433-pcie", },
++	{ .compatible = "samsung,exynos990-pcie", },
+ 	{ },
+ };
+ 

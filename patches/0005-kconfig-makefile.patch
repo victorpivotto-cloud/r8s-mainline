@@ -1,0 +1,16 @@
+diff --git a/drivers/pci/controller/dwc/Kconfig b/drivers/pci/controller/dwc/Kconfig
+index b6d6778b0..bfb099aeb 100644
+--- a/drivers/pci/controller/dwc/Kconfig
++++ b/drivers/pci/controller/dwc/Kconfig
+@@ -346,6 +346,11 @@ config PCI_EXYNOS
+ 	depends on ARCH_EXYNOS || COMPILE_TEST
+ 	depends on PCI_MSI
+ 	select PCIE_DW_HOST
++	# Sem HAVE_PWRCTL o ath11k nao puxa PCI_PWRCTL_PWRSEQ, e o QCA6390 nunca
++	# recebe a sequencia de ligamento — o link simplesmente nao treina. No
++	# 6.12 nenhum controlador declara este simbolo; nas plataformas Qualcomm
++	# ele veio depois. E generico do DWC, entao vale aqui.
++	select HAVE_PWRCTL
+ 	help
+ 	  Enables support for the PCIe controller in the Samsung Exynos SoCs
+ 	  to work in host mode. The PCI controller is based on the DesignWare

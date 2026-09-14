@@ -1,0 +1,23 @@
+diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
+index be9d2c69c..f58b55a89 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -18,7 +18,17 @@
+ #include "qmi.h"
+ 
+ #define ATH11K_PCI_BAR_NUM		0
+-#define ATH11K_PCI_DMA_MASK		36
++/*
++ * r8s (Exynos 990): 32, nao 36.
++ *
++ * O S2MPU so concede DMA na RAM BAIXA — o hipervisor recusa qualquer endereco
++ * acima de 4 GB (devolve 0x700). Com mascara de 36 bits os buffers de dados
++ * caiam na RAM alta (medido: 0x8866d4000), o dispositivo tinha a escrita
++ * bloqueada e o QRTR lia lixo reciclado ("Invalid version 16", com ponteiros
++ * de kernel no buffer). Com 32 bits o swiotlb rebate esses buffers para a
++ * faixa baixa, que esta concedida.
++ */
++#define ATH11K_PCI_DMA_MASK		32
+ #define ATH11K_PCI_COHERENT_DMA_MASK	32
+ 
+ #define TCSR_SOC_HW_VERSION		0x0224
