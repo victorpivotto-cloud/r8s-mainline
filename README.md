@@ -52,7 +52,7 @@ S-Boot -> lk3rd (sda13) -> our kernel (sda33) -> Debian 13     ~22 s, no PC
 
 ---
 
-## Three findings that were not published anywhere
+## Findings that were not published anywhere
 
 ### 1. MSI on the Exynos 990 PCIe controller
 
@@ -125,6 +125,41 @@ driver. Fix: build `PCI_EXYNOS` as a **module** so it loads after the initcalls.
 
 ---
 
+### 4. Stopping `getty@tty1` freezes PID 1
+
+With the console on `simpledrm`, **stopping or restarting the `getty` unit
+freezes systemd for good**. The last line PID 1 ever logs is
+`Stopped getty@tty1.service`.
+
+The phone keeps answering **ping, DNS and HTTP** — everything served by
+already-resident processes — while every session, every `systemctl` and the
+software power-off hang. It looks alive and is unmanageable. Only
+`Power` + `Volume Down` gets it back.
+
+`simpledrm` does not implement `fb_blank` (`/sys/class/graphics/fb0/blank` is
+**empty**); releasing the TTY wedges the VT/fbcon path.
+
+To blank the screen instead, switch to an **empty VT** and paint the
+framebuffer — painting alone is not enough, the console redraws over it:
+
+```sh
+chvt 2 && dd if=/dev/zero of=/dev/fb0 bs=4320 count=2400
+```
+
+Full write-up: `docs/TELA-E-CONSOLE.md`. This is probably the most transferable
+finding here — it applies to any phone running mainline with `simpledrm`.
+
+### 5. `systemctl reboot` does not come back
+
+There is no `reboot-mode` node in the DT, so Linux never writes the reboot
+reason and the bootloader lands in **Download Mode**, needing physical
+intervention. Use `poweroff`: with a **wall charger** the phone powers itself
+back on in ~10 s, even from an empty battery.
+
+From a **PC USB port** it will not: the driver caps input at 500 mA and the
+running phone draws 530–600 mA, so it boots, runs ~75 s and dies, repeatedly.
+Details in `docs/ENERGIA-E-BOOT.md`.
+
 ## Known problems with this port
 
 - **The S2MPU grant is broad.** It currently grants RW over all low RAM to the
@@ -148,9 +183,18 @@ driver. Fix: build `PCI_EXYNOS` as a **module** so it loads after the initcalls.
 patches/   kernel patches, by subject
 drivers/   new files (rails, S2MPU grant helper)
 dts/       exynos990-r8s-b.dts
-scripts/   on-device helpers (card prep, rotation, Wi-Fi, OTG VBUS)
+scripts/   on-device helpers (card prep, rotation, Wi-Fi, OTG VBUS,
+           screen toggle, software watchdog)
 docs/      detailed write-ups, in Portuguese
 ```
+
+Docs worth reading even if you are not porting this exact phone:
+
+| | |
+|---|---|
+| `docs/TELA-E-CONSOLE.md` | the `getty`/`simpledrm` freeze and how to blank the screen |
+| `docs/ENERGIA-E-BOOT.md` | reboot lands in Download Mode; self power-on; charging traps |
+| `docs/LACUNAS-DE-KERNEL.md` | kernel config gaps you will hit (`IP_MULTIPLE_TABLES`, `NF_CONNTRACK_NETLINK`, `nft_redir`, no watchdog) |
 
 Patches apply on the `exynos990-fu` branch of
 [exynos990-mainline/linux](https://github.com/exynos990-mainline/linux)
