@@ -139,11 +139,15 @@ software power-off hang. It looks alive and is unmanageable. Only
 `simpledrm` does not implement `fb_blank` (`/sys/class/graphics/fb0/blank` is
 **empty**); releasing the TTY wedges the VT/fbcon path.
 
-To blank the screen instead, switch to an **empty VT** and paint the
-framebuffer — painting alone is not enough, the console redraws over it:
+Writing to `/dev/fb0` **does not reach the panel**: the kernel reported the
+framebuffer fully zeroed while the panel still showed text. `simpledrm` keeps a
+shadow buffer and only flushes it through the DRM damage path, which the console
+uses and `dd` does not. Blank through the console instead, and silence the
+kernel or the next message repaints over it:
 
 ```sh
-chvt 2 && dd if=/dev/zero of=/dev/fb0 bs=4320 count=2400
+sysctl -w kernel.printk="1 4 1 7"
+printf '\033[?25l\033[H\033[2J' > /dev/tty1
 ```
 
 Full write-up: `docs/TELA-E-CONSOLE.md`. This is probably the most transferable

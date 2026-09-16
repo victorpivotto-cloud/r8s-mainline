@@ -42,23 +42,37 @@ a TTY trava o caminho de VT/fbcon e o systemd espera para sempre.
 
 ## Como apagar a tela sem tocar no `getty`
 
-Pintar o framebuffer de preto **não basta**: o console do VT 1 repinta em
-seguida. A saída é trocar para um terminal virtual **vazio**, onde não há nada
-para redesenhar:
+**Escrever no `/dev/fb0` não chega ao painel.** Este é o segundo achado, e
+custou horas: o kernel reportava o framebuffer **inteiramente zerado** enquanto
+o painel exibia texto. O `simpledrm` mantém um buffer de sombra e só o despeja
+pelo caminho de dano do DRM — que o console usa e o `dd` não.
+
+O que funciona é fazer tudo **pelo console**:
 
 ```sh
 # apagar
-chvt 2                                        # VT sem getty
-dd if=/dev/zero of=/dev/fb0 bs=4320 count=2400
+sysctl -w kernel.printk="1 4 1 7"                  # cala o kernel
+printf '\033[?25l\033[H\033[2J' > /dev/tty1        # esconde cursor, limpa
 
 # acender
-chvt 1
-printf '\033[H\033[2J' > /dev/tty1            # limpa
-cat /etc/issue        > /dev/tty1             # escreve o que se quer mostrar
+sysctl -w kernel.printk="4 4 1 7"
+printf '\033[?25h\033[H\033[2J' > /dev/tty1
+cat /etc/issue                   > /dev/tty1       # o que se quer mostrar
 ```
 
-Precisa do pacote `kbd` (`chvt`, `fgconsole`). Zero chamadas ao gerenciador de
-serviços. Verificado com 10 alternâncias seguidas, `systemd running` em todas.
+**As duas metades são necessárias.** Limpar sem calar o `printk` deixa a tela
+preta por instantes e a primeira mensagem de kernel repinta — no nosso caso,
+duas linhas de `cpufreq: Failed to change cpu frequency` apareceram sobre o
+preto e denunciaram o mecanismo.
+
+Zero chamadas ao gerenciador de serviços, e nenhum `chvt` necessário.
+
+### Por que a receita errada parecia funcionar
+
+A versão anterior deste documento recomendava `chvt 2` mais
+`dd if=/dev/zero of=/dev/fb0`. **Não funciona.** Ela passou numa medição
+isolada porque o console repintou logo depois do `chvt`, e o preto veio dele —
+não do `dd`. Atribuímos o resultado ao passo errado. Corrigido aqui.
 
 Num painel **Super AMOLED**, pixel preto é pixel desligado — isso economiza
 energia de verdade, não só esconde. Não há `/sys/class/backlight` neste
