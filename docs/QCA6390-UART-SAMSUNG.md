@@ -468,3 +468,25 @@ Na [RA Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/bl
 precisa manter coerência entre recursos, inicialização e rate recalc, sem
 transplantar escritas CAL por tentativa. Nenhuma mudança de driver ou ensaio
 foi realizado nesta comparação.
+
+### Consumidores UART/USI e Q-channel
+
+O [driver UART mainline](https://github.com/torvalds/linux/blob/v6.12-rc5/drivers/tty/serial/samsung_tty.c)
+usado pelo porte espera `uart` para o controlador e `clk_uart_baud0` para
+baud. `s3c24xx_serial_getclk` usa `clk_get_rate` para calcular divisores;
+esse caminho não pede `clk_set_rate` ao CMU. O wrapper USI tem seus próprios
+consumidores `pclk` e `ipclk`, como mostra o
+[binding USI](https://github.com/torvalds/linux/blob/v6.12-rc5/Documentation/devicetree/bindings/soc/samsung/exynos-usi.yaml).
+No DT do porte auditado, ambos os pares apontam para o mesmo fixed-clock
+200 MHz. Uma integração real precisa revisar ambos, manter os nomes mainline
+e preservar a disponibilidade do clock de bus durante acesso ao CMU.
+Copiar `gate_uart_clk1/ipclk_uart1` do DT vendor não atende esse consumidor.
+
+O gate vendor de UART também exige revisão própria: a
+[tabela QCH](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/exynos9830/cmucal-qch.c)
+registra `PERIC1_TOP0_QCH_UART_BT` como Q-channel. Na tabela SFR acima, seu
+registro fica em PERIC1 + `0x302c`: ENABLE bit 0, CLOCK_REQ bit 1,
+IGNORE_FORCE_PM_EN bit 2 e EXPIRE_VAL bits 25:16. Esse recurso não é o gate
+TOP de bit 21. A RA possui operações distintas para QCH; validar request,
+ignore e política de enable antes de tratá-lo como um gate CCF simples.
+Nenhum desses registros foi lido ou escrito no telefone nesta análise.
