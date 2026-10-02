@@ -1,0 +1,173 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1206,10 +1206,11 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab_rxphase;
++static bool r8s_qca_lab_build_info;
+ static atomic_t r8s_lab_run_claimed = ATOMIC_INIT(0);
+-module_param_named(r8s_qca_lab_rxphase, r8s_qca_lab_rxphase, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab_rxphase, "Lab one-shot QCA6390 RX phase counters at 3M/20ms, default off");
++static atomic_t r8s_lab_event_logs = ATOMIC_INIT(0);
++module_param_named(r8s_qca_lab_build_info, r8s_qca_lab_build_info, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_build_info, "Lab one-shot QCA6390 build-info query at115200, default off");
+
+ static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
+ {
+@@ -1230,7 +1231,22 @@
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_build_info ? atomic_read(&qca->lab_phase) : 0;
++
++	/* Observe only the active read-only query's event header, not label data. */
++	if (lab_phase == 2 && skb->len >= 2 &&
++	    atomic_add_unless(&r8s_lab_event_logs, 1, 4)) {
++		unsigned int width = skb->data[0] == HCI_EV_CMD_COMPLETE ? 5 : 4;
++		int cc_status = -1;
++
++		if (skb->len >= 6 && skb->data[0] == HCI_EV_CMD_COMPLETE &&
++		    get_unaligned_le16(skb->data + 3) == EDL_PATCH_CMD_OPCODE)
++			cc_status = skb->data[5];
++
++		bt_dev_warn(hdev, "LAB build-info RX event=%02x len=%u ccstatus=%d header=%*ph",
++			    skb->data[0], skb->len, cc_status,
++			    (int)min_t(unsigned int, skb->len, width), skb->data);
++	}
+
+ 	if (lab_phase > 0 && lab_phase < 6) {
+ 		atomic_inc(&qca->lab_events[lab_phase]);
+@@ -1240,7 +1256,7 @@
+ 	}
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab_rxphase && skb->len >= 5 &&
++	if (r8s_qca_lab_build_info && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1311,7 +1327,7 @@
+ static int qca_recv(struct hci_uart *hu, const void *data, int count)
+ {
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_build_info ? atomic_read(&qca->lab_phase) : 0;
+ 	bool lab_active = lab_phase > 0 && lab_phase < 6;
+
+ 	if (lab_active && count > 0) {
+@@ -1432,7 +1448,7 @@
+ 		break;
+
+ 	case QCA_QCA6390:
+-		if (r8s_qca_lab_rxphase) {
++		if (r8s_qca_lab_build_info) {
+ 			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
+ 			msleep(20);
+ 		} else {
+@@ -1923,6 +1939,25 @@
+ 	return 0;
+ }
+
++static int qca_lab_build_info(struct hci_dev *hdev)
++{
++	const u8 cmd = EDL_GET_BUILD_INFO_CMD;
++	struct sk_buff *skb;
++	int ret;
++
++	/* Same read-only opcode/subcommand as btqca; no label/payload logging. */
++	skb = __hci_cmd_sync_ev(hdev, EDL_PATCH_CMD_OPCODE, EDL_PATCH_CMD_LEN,
++				&cmd, 0, HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++	bt_dev_warn(hdev, "LAB build-info response len=%u header=%*ph", skb->len,
++		    (int)min_t(unsigned int, skb->len, 3), skb->data);
++	/* Do not assume success or string format from a completed transport. */
++	ret = skb->len >= 2 ? 0 : -EILSEQ;
++	kfree_skb(skb);
++	return ret;
++}
++
+ static int qca_setup(struct hci_uart *hu)
+ {
+ 	struct hci_dev *hdev = hu->hdev;
+@@ -1936,13 +1971,13 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab_rxphase &&
++	if (r8s_qca_lab_build_info &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3000000))
+ 		return -EINVAL;
+
+-	if (r8s_qca_lab_rxphase && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
++	if (r8s_qca_lab_build_info && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
+ 		return -ECANCELED;
+
+ 	ret = qca_check_speeds(hu);
+@@ -1996,7 +2031,7 @@
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_build_info) {
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 		if (ret)
+ 			goto out;
+@@ -2011,37 +2046,21 @@
+ 			ret = -ENODEV;
+ 			goto out;
+ 		}
+-		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
++		bt_dev_warn(hdev, "LAB version115200 verified; one read-only build-info query");
+ 		atomic_set(&qca->lab_phase, 2);
+-		hci_uart_set_flow_control(hu, true);
+-		ret = qca_set_speed(hu, QCA_OPER_SPEED);
+-		hci_uart_set_flow_control(hu, false);
+-		if (ret)
++		ret = qca_lab_build_info(hdev);
++		bt_dev_warn(hdev, "LAB build-info transport ret=%d; no baud/TLV/NVM", ret);
++		/* Avoid an ambiguous same-opcode query after a command timeout. */
++		if (ret == -ETIMEDOUT)
+ 			goto out;
++		/* Restore no state: query only; final version is a liveness observation. */
+ 		atomic_set(&qca->lab_phase, 3);
+-		bt_dev_warn(hdev, "LAB version3M request; no TLV/NVM");
+ 		ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 		if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+ 		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
+ 		    le32_to_cpu(ver.soc_id) != 0x400a0200))
+ 			ret = -ENODEV;
+-
+-		bt_dev_warn(hdev, "LAB version3M end ret=%d", ret);
+-		if (ret == -ETIMEDOUT) {
+-			atomic_set(&qca->lab_phase, 4);
+-			/* One host-only query; no second baud command to the controller. */
+-			ret = qca_set_speed(hu, QCA_INIT_SPEED);
+-			if (ret)
+-				goto out;
+-			atomic_set(&qca->lab_phase, 5);
+-			bt_dev_warn(hdev, "LAB host-only115200 query; no new baud command");
+-			ret = qca_read_soc_version(hdev, &ver, soc_type);
+-			if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+-			    le16_to_cpu(ver.rom_ver) != 0x0200 ||
+-			    le32_to_cpu(ver.soc_id) != 0x400a0200))
+-				ret = -ENODEV;
+-			bt_dev_warn(hdev, "LAB host-only115200 end ret=%d; diagnostic abort", ret);
+-		}
++		bt_dev_warn(hdev, "LAB final version115200 ret=%d; diagnostic abort", ret);
+ 		goto out;
+ 	}
+
+@@ -2121,7 +2140,7 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_build_info) {
+ 		atomic_set(&qca->lab_phase, 0);
+ 		qca_lab_rx_dump(hdev, qca);
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);

@@ -222,3 +222,32 @@ Não transportar essas mudanças para Hastings por presunção. Próximo diagnó
 deve esclarecer o contrato do comando/estado do controlador e o RTS físico;
 repetir a matriz de bauds/atrasos ou relaxar parser sem evidência não resolve
 a ausência de bytes nesta etapa.
+
+
+## Build-info: erro de resposta também pode virar -110
+
+O [ensaio de leitura build-info](../experiments/qca-build-info/README.md)
+permaneceu a115200, confirmou a versão, enviou somente fc00/sub20 e abortou
+antes de baud/firmware. Instrumentação progressiva identificou um Command
+Complete0x0e, ncmd1/opcodefc00, nove bytes no skb (dez com H4), primeiro
+retorno0x10. O errno-110 surgiu em poucos milissegundos, com resposta recebida.
+
+Na fonte do núcleo HCI usada neste porte, o opcode vendor sem handler dedicado
+usa o primeiro retorno como status; `__hci_cmd_sync_sk` converte uma requisição
+concluída com `bt_to_errno`, que traduz0x10 paraETIMEDOUT. Neste comando,
+-110 é erro de resposta traduzido, não expiração da janela de espera do host.
+Não extrapolar essa leitura para os testes de3M/3,2M: lá houve espera de~2s
+e zero bytes nas fases de baud/consulta. O significado vendor de0x10 e o
+estado aplicação/download ainda não estão confirmados.
+
+A versão respondeu novamente na primeira rodada; as seguintes pularam essa
+consulta ao receber-110, para evitar ambiguidade com resposta tardia de outro
+subcomando no mesmoopcode. Fase versão teve21bytes, build-info10bytes, sem
+erro H4 ou recusaREGISTERED. Na versão final da instrumentação, UART TX+10/
+RX+31 e MGMT vazio. Guardas/restauração dos originais passaram nas três
+rodadas30s; mesmo kernel/boot/máscaras0/limites originais/sensores normais/
+zero unidades falhas, sem reboot/firmware/partição/WiFi ou qualificação24h.
+
+Não ignorar esse status para extrair label nem alterar parser por esse
+resultado. Ainda falta esclarecer contrato do controlador e controle físico
+de RTS; essas leituras não habilitam Bluetooth.
