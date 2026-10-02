@@ -361,3 +361,11 @@ Comparação de cinco projetos, com revisões fixadas e limites por transporte/S
 mas seu ajuste hci_qca trata descoberta posterior; os patches btusb dos
 projetos5.10 não corrigem o downloader UART. Próximo: HAL Hastings e origem
 do firmware r8s. Esta rodada foi somente análise no host e leitura passiva.
+
+### HAL Hastings e diagnóstico de sequência UART
+
+[Análise da HAL](QCA6390-HAL-HASTINGS.md): o status unificado é o primeiro
+byte00, não o terceiro03; significado do byte adicional continua pendente.
+Consulta de versão115200 antes da mudança3M, com flow control temporário,
+respondeu em115200 mas expirou a3M. Sem patch/NVM/retries, originais restaurados.
+Não é correção; próximo revisar UART Samsung/clock/CTS e ACK de baud.

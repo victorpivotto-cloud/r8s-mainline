@@ -57,3 +57,6 @@ O teste de conexão com outro computador só faz sentido depois de HCI básico
 funcionar. Nenhum firmware, imagem, endereço Bluetooth ou log bruto acompanha
 este documento. O resultado físico anterior está em
 [diagnóstico de um segmento](../experiments/qca-first-segment/README.md).
+
+Continuação: [HAL Hastings e diagnóstico UART](QCA6390-HAL-HASTINGS.md)
+identificou o offset de status unificado e um ensaio negativo de versão3M.
