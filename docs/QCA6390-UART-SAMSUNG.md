@@ -252,7 +252,7 @@ Não ignorar esse status para extrair label nem alterar parser por esse
 resultado. Ainda falta esclarecer contrato do controlador e controle físico
 de RTS; essas leituras não habilitam Bluetooth.
 
-## Exclusive RTS GPIO candidate and receive-gate control
+## Historical exclusive RTS candidate and receive-gate control (superseded below)
 
 A RAM-only DT candidate replaced the static RTS-low hog with GPIO output-low
 pinctrl plus an exclusively acquired lab descriptor. GPIO CON1/DAT0/PUD1/DRV2
@@ -280,6 +280,40 @@ write-wakeup WARN_ON before the instrumentation. Therefore the apparent
 UART/serdev delivery gap was a lab bug, not an established UART/TTY or physical
 RTS failure. The control RX-gate module did not have that layout change and
 its successful query remains valid. The current RTS patch preserves hci_uart
-at offset zero and enforces it at compile time. The pulse remains untested;
-a corrected low-only query is required before any pulse. Original control
+at offset zero and enforces it at compile time. At the time of this correction, the pulse remained untested; a corrected
+low-only query was required before any pulse. The results below supersede
+that pending step. Original control
 kernel, DT and modules were restored; no production GPIO change was installed.
+
+### Corrected low-only and GPIO baud trials
+
+After preserving hci_uart at offset zero, the exclusive RTS-low query passed:
+21bytes reached serdev(READY1/REGISTERED1) and QCA(phase1/REGISTERED1), with valid
+version IDs and no H4 errors or warnings. Its query exit took3.727456ms on the
+same ktime clock. This supports the diagnosed lab-layout error; no UART→TTY
+loss was established by the invalid trials.
+
+Corrected GPIO0→1→0 trials at3M and3.2M both accepted the five-byte baud command,
+used20ms before drain, and lowered RTS after changing the host rate. High-baud
+version queries timed out; one host-only return to115200 produced valid
+versions. RX was21bytes in each initial/final version phase and zero in the
+baud/high-query/host-return phases; no fc48 CC was observed. UART TX20/RX42
+matched. At3.2M, API/UART selected3200000 with UBRDIV2/frac14, declared clock200MHz
+and AFC restored before querying. No warning occurred in these corrected
+trials, and bounded module/parameter/LOW restorations passed.
+
+GPIO DAT readback and selected UART divisors do not measure voltage or baud
+on the wire. These negative results do not establish firmware, clock or RTS
+causality. Do not repeat the unchanged matrix. Remaining work should focus on
+fc48/controller-state semantics and independent UART clock/signal evidence.
+See [`qca-rts-low-rxgate`](../experiments/qca-rts-low-rxgate/README.md) and
+[`qca-rts-3200`](../experiments/qca-rts-3200/README.md). Bluetooth remains
+unenabled;24h qualification remains deferred.
+
+The final bounded RAM return restored the original control kernel and DT,
+static RTS-low hog and installed modules. Original module hashes/srcversion,
+frequency limits, zero failsafe/fault masks and inactive lab units were verified.
+Battery health was Good at34.1°C, SoC sensors were at most53°C, and full new
+kernel logs contained no warning, BUG, Oops, panic or late ACK. No partition
+was written; Bluetooth operation, audio/camera and24h qualification remain
+pending.

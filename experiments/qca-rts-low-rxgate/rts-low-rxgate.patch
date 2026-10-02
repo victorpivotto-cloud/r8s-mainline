@@ -1,0 +1,220 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -16,6 +16,7 @@
+  */
+
+ #include <linux/kernel.h>
++#include <linux/of.h>
+ #include <linux/atomic.h>
+ #include <linux/clk.h>
+ #include <linux/completion.h>
+@@ -224,7 +225,9 @@
+ };
+
+ struct qca_serdev {
++	/* serdev callbacks cast drvdata to hci_uart: this must stay first. */
+ 	struct hci_uart	 serdev_hu;
++	struct gpio_desc *lab_rts;
+ 	struct gpio_desc *bt_en;
+ 	struct gpio_desc *sw_ctrl;
+ 	struct clk	 *susclk;
+@@ -1206,11 +1209,11 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab_rxgate;
++static bool r8s_qca_lab_rts_low_rxgate;
+ static atomic_t r8s_lab_run_claimed = ATOMIC_INIT(0);
+ static atomic_t r8s_lab_recv_logs = ATOMIC_INIT(0);
+-module_param_named(r8s_qca_lab_rxgate, r8s_qca_lab_rxgate, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab_rxgate, "Lab one-shot QCA6390 version115200 RX gating, default off");
++module_param_named(r8s_qca_lab_rts_low_rxgate, r8s_qca_lab_rts_low_rxgate, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_rts_low_rxgate, "Lab one-shot r8s GPIO RTS LOW version RX gating, default off");
+
+ static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
+ {
+@@ -1231,7 +1234,7 @@
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxgate ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rts_low_rxgate ? atomic_read(&qca->lab_phase) : 0;
+
+ 	if (lab_phase > 0 && lab_phase < 6) {
+ 		atomic_inc(&qca->lab_events[lab_phase]);
+@@ -1241,7 +1244,7 @@
+ 	}
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab_rxgate && skb->len >= 5 &&
++	if (r8s_qca_lab_rts_low_rxgate && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1312,10 +1315,10 @@
+ static int qca_recv(struct hci_uart *hu, const void *data, int count)
+ {
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxgate ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rts_low_rxgate ? atomic_read(&qca->lab_phase) : 0;
+ 	bool lab_active = lab_phase > 0 && lab_phase < 6;
+
+-	if (r8s_qca_lab_rxgate && atomic_inc_return(&r8s_lab_recv_logs) <= 8)
++	if (r8s_qca_lab_rts_low_rxgate && atomic_inc_return(&r8s_lab_recv_logs) <= 8)
+ 		bt_dev_warn(hu->hdev, "LAB QCA RX phase=%d count=%d registered=%d ns=%llu",
+ 			    lab_phase, count, test_bit(HCI_UART_REGISTERED, &hu->flags),
+ 			    ktime_get_ns());
+@@ -1438,7 +1441,7 @@
+ 		break;
+
+ 	case QCA_QCA6390:
+-		if (r8s_qca_lab_rxgate) {
++		if (r8s_qca_lab_rts_low_rxgate) {
+ 			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
+ 			msleep(20);
+ 		} else {
+@@ -1929,6 +1932,30 @@
+ 	return 0;
+ }
+
++/* Restore before devres releases the exclusively acquired descriptor. */
++static void qca_lab_rts_restore(void *data)
++{
++	struct gpio_desc *rts = data;
++
++	gpiod_set_value_cansleep(rts, 0);
++	if (gpiod_get_value_cansleep(rts) != 0)
++		pr_err("Bluetooth: LAB RTS cleanup LOW readback failed\n");
++}
++
++static int qca_lab_rts_low(struct hci_uart *hu)
++{
++	struct qca_serdev *qcadev = serdev_device_get_drvdata(hu->serdev);
++	int observed;
++
++	if (!qcadev->lab_rts)
++		return -ENODEV;
++	gpiod_set_value_cansleep(qcadev->lab_rts, 0);
++	observed = gpiod_get_value_cansleep(qcadev->lab_rts);
++	bt_dev_warn(hu->hdev, "LAB GPIO RTS low-only observed=%d ns=%llu",
++		    observed, ktime_get_ns());
++	return observed == 0 ? 0 : -EIO;
++}
++
+ static int qca_setup(struct hci_uart *hu)
+ {
+ 	struct hci_dev *hdev = hu->hdev;
+@@ -1942,13 +1969,13 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab_rxgate &&
++	if (r8s_qca_lab_rts_low_rxgate &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3000000))
+ 		return -EINVAL;
+
+-	if (r8s_qca_lab_rxgate && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
++	if (r8s_qca_lab_rts_low_rxgate && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
+ 		return -ECANCELED;
+
+ 	ret = qca_check_speeds(hu);
+@@ -1996,18 +2023,27 @@
+ 	qca->memdump_state = QCA_MEMDUMP_IDLE;
+
+ retry:
++	if (r8s_qca_lab_rts_low_rxgate)
++		bt_dev_warn(hdev, "LAB stage power-on begin ns=%llu", ktime_get_ns());
+ 	ret = qca_power_on(hdev);
++	if (r8s_qca_lab_rts_low_rxgate)
++		bt_dev_warn(hdev, "LAB stage power-on end ret=%d ns=%llu", ret, ktime_get_ns());
+ 	if (ret)
+ 		goto out;
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab_rxgate) {
++	if (r8s_qca_lab_rts_low_rxgate) {
++		ret = qca_lab_rts_low(hu);
++		if (ret)
++			goto out;
++		bt_dev_warn(hdev, "LAB stage host-init begin ns=%llu", ktime_get_ns());
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
++		bt_dev_warn(hdev, "LAB stage host-init end ret=%d ns=%llu", ret, ktime_get_ns());
+ 		if (ret)
+ 			goto out;
+ 		atomic_set(&qca->lab_phase, 1);
+-		bt_dev_warn(hdev, "LAB version first begin115200; no TLV/NVM");
++		bt_dev_warn(hdev, "LAB version first begin115200 ns=%llu; no TLV/NVM", ktime_get_ns());
+ 		ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 		if (ret)
+ 			goto out;
+@@ -2017,7 +2053,7 @@
+ 			ret = -ENODEV;
+ 			goto out;
+ 		}
+-		bt_dev_warn(hdev, "LAB control version115200 verified; no baud/TLV/NVM");
++		bt_dev_warn(hdev, "LAB low-only version115200 verified; no baud/TLV/NVM");
+ 		goto out;
+ 	}
+
+@@ -2097,7 +2133,10 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab_rxgate) {
++	if (r8s_qca_lab_rts_low_rxgate) {
++		bt_dev_warn(hdev, "LAB stage query-out ret=%d ns=%llu", ret, ktime_get_ns());
++		if (qca_lab_rts_low(hu))
++			ret = -EIO;
+ 		atomic_set(&qca->lab_phase, 0);
+ 		qca_lab_rx_dump(hdev, qca);
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
+@@ -2418,6 +2457,8 @@
+ 	int err;
+ 	bool power_ctrl_enabled = true;
+
++	BUILD_BUG_ON(offsetof(struct qca_serdev, serdev_hu) != 0);
++
+ 	qcadev = devm_kzalloc(&serdev->dev, sizeof(*qcadev), GFP_KERNEL);
+ 	if (!qcadev)
+ 		return -ENOMEM;
+@@ -2439,6 +2480,37 @@
+ 		qcadev->btsoc_type = data->soc_type;
+ 	else
+ 		qcadev->btsoc_type = QCA_ROME;
++
++	if (r8s_qca_lab_rts_low_rxgate) {
++		struct of_phandle_args spec;
++
++		if (qcadev->btsoc_type != QCA_QCA6390 ||
++		    !of_machine_is_compatible("samsung,r8s"))
++			return -EINVAL;
++		err = of_parse_phandle_with_args(serdev->dev.of_node,
++				"r8s-lab-rts-gpios", "#gpio-cells", 0, &spec);
++		if (err)
++			return err;
++		err = of_node_name_eq(spec.np, "gpq0-gpio-bank") &&
++		      spec.args_count == 2 && spec.args[0] == 2 && spec.args[1] == 0
++		      ? 0 : -EINVAL;
++		of_node_put(spec.np);
++		if (err)
++			return err;
++		qcadev->lab_rts = devm_gpiod_get(&serdev->dev, "r8s-lab-rts",
++					      GPIOD_OUT_LOW);
++		if (IS_ERR(qcadev->lab_rts))
++			return PTR_ERR(qcadev->lab_rts);
++		err = devm_add_action_or_reset(&serdev->dev, qca_lab_rts_restore,
++					       qcadev->lab_rts);
++		if (err)
++			return err;
++		if (gpiod_is_active_low(qcadev->lab_rts) ||
++		    gpiod_get_value_cansleep(qcadev->lab_rts) != 0)
++			return -EIO;
++		dev_warn(&serdev->dev, "LAB exclusive RTS GPIO acquired LOW\n");
++	}
++
+
+ 	switch (qcadev->btsoc_type) {
+ 	case QCA_WCN3988:

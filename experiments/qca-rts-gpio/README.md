@@ -46,3 +46,25 @@ UART counters increased TX5/RX21 across the30s window, despite the zero active Q
 Both module removals completed; original modules, hashes, flags and limits were restored with RTS LOW and normal health. A single bounded RAM return restored the original DT and GPIO hog. The follow-up `../qca-rxgate/` control kept the correct structure layout and delivered a valid version, without another baud command or GPIO pulse. It does not validate the invalid GPIO module.
 
 The public patch sequence was checked against the exact compiled sources. The DTS include compiles against the board tree; the RAM image's semantic changes were independently restricted to the five relevant DT nodes, with kernel/ramdisk/header preserved except DT size. Raw logs, images and device identifiers remain private.
+
+## Corrected GPIO trial at3M, 2026-10-02
+
+After the corrected low-only query passed, one corrected3M trial was run.
+Initial version115200 matched the IDs. GPIO DAT readback changed0→1→0;
+the HIGH-to-LOW observation interval was23.710323ms. Serdev accepted all five
+baud-command bytes. The inherited20ms pre-drain delay and host3M switch were
+followed by LOW restoration before querying.
+
+The3M query timed out after roughly2s. Returning only the host to115200
+produced a valid version again. RX phases1/5 each had21bytes/one event; phases
+2/3/4 were empty, with no H4 error, refusal, partial frame or observed fc48 CC.
+UART TX20/RX42 matched. No new warning or health fault occurred. The30s trial
+completed with bounded successful unload, original modules/hashes/flags/limits
+and LOW restored. No firmware/NVM, IBS or retry occurred in the lab branch.
+
+This is a valid negative result for this3M GPIO/timing sequence. It does not
+measure voltage at the pad or physical baud, prove controller receipt, reject
+all RTS sequences, or qualify Bluetooth. The distinct3.2M combination, using
+the existing opt-in UART ceiling, is described in
+[`../qca-rts-3200/`](../qca-rts-3200/README.md). Do not repeat the unchanged3M
+trial or reuse the invalid e5c7d00 layout.
