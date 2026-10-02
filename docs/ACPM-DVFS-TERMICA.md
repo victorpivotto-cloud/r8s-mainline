@@ -117,3 +117,32 @@ enable/recuperação e unload/reload com confirmação do ciclo de vida do hwmon
 Depois de trocar o módulo, reiniciar a qualificação. Backoff/desabilitação do
 core em erro persistente pode exigir re-enable explícito. Essa correção não
 resolve late ACK, calibração, falta de watchdog ou causa do reset.
+
+
+## ACK tardio: lacuna reproduzida em simulação
+
+O teste `tests/test-single-slot-late-ack.py` extrai e compila a função real
+`acpm_wait_for_singleslot_response` do provider corrigido. O controle com ACK
+correspondente conclui normalmente. Após simular timeout do comando 1 e seu
+ACK durante o comando 2, a função aceita o ACK antigo, limpa a interrupção e
+libera a sequência do comando 2. O caso sem payload RX também reproduz isso.
+
+```sh
+python3 tests/test-single-slot-late-ack.py \
+  --source /caminho/kernel/drivers/firmware/samsung/exynos-acpm.c
+```
+
+`REPRODUCED` caracteriza uma hipótese insegura do código sob a condição
+simulada; não demonstra que o firmware produziu esse ACK no aparelho ou que
+isso causou o reset. O setter DVFS usa `response=false`, e a espera se baseia
+no bit de interrupção do canal, sem correlacionar a sequência da resposta.
+O timeout de polling desse provider é 100 ms. Nenhum timeout foi provocado
+no aparelho para este teste; o kernel permaneceu inalterado.
+
+Antes de corrigir, confirmar no protocolo vendor se uma operação sem RX
+produz resposta com sequência, como o slot se comporta após timeout e como
+as interrupções são reconhecidas. Comparar cegamente uma sequência de RX
+que o firmware talvez não escreva pode impedir todo DVFS. Desabilitar o canal
+após erro também pode impedir a redução térmica de frequência. Revisão de
+Claude sobre texto público confirmou esses limites; a investigação segue
+aberta, sem patch de recuperação instalado.

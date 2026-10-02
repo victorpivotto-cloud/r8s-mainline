@@ -55,3 +55,11 @@ Uma janela seguinte de180s concluiu 30 tarefas Ninja, incluindo o
 objeto C gerado que excedeu60s, com pico55C, failsafe0, sem reset e
 limites restaurados. Demonstra progresso do build sob carga reduzida; não
 resolve a causa do reset nem aprova compilação completa ou carga irrestrita.
+
+
+Outra janela de180s concluiu mais59 tarefas Ninja, com359 amostras,
+pico54C, bateria34,1C e failsafe0. Consumo de CPU173,715s e pico de
+memória224,6M. A janela encerrou por timeout esperado, preservou o boot,
+restaurou os três limites e terminou sem unidades falhas ou novos erros
+DVFS. Esses resultados justificam progresso incremental sob as mesmas
+guardas; a compilação completa e a causa do reset continuam pendentes.
