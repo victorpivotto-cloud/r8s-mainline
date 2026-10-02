@@ -169,6 +169,15 @@ a um segmento. O próximo diagnóstico deve relacionar TX efetivo, ordem de
 segmentos e CC; manter as validações de tamanho/status e não repetir o blob
 sem hipótese nova.
 
+O diagnóstico posterior de [um segmento isolado](../experiments/qca-first-segment/README.md)
+resolveu essa atribuição: enviou apenas os primeiros243bytes, com espera
+síncrona e saída obrigatória antes do restante/NVM, sem retries do laboratório.
+Recebeu novamente00 1e 03 em cerca24ms, mantendo-EILSEQ. Portanto esse erro
+já ocorre no primeiro segmento isolado; não depende do envio completo.
+Significado de03 e motivo da rejeição continuam abertos. Módulos originais
+foram restaurados e conferidos após retiradas com retorno0. Comparação de
+metadados da referência r8s está no README; não foi instalada/carregada.
+
 Uma nova rodada acompanhada testou somente o fallback de firmware existente:
 OPER115200 e consulta de versão passaram, mantendo IBS desabilitado e sem
 chamar a rotina de download patch/NVM. O comando HCI padrão Reset0x0c03

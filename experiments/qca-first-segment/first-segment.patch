@@ -1,0 +1,125 @@
+--- a/drivers/bluetooth/btqca.c
++++ b/drivers/bluetooth/btqca.c
+@@ -481,7 +481,9 @@
+ 	}
+
+ 	if (skb->len != rlen) {
+-		bt_dev_err(hdev, "QCA TLV response size mismatch");
++		bt_dev_err(hdev, "QCA TLV response size mismatch got=%u expected=%u soc=%u want_ev=%#x head=%*ph",
++			   skb->len, rlen, soc_type, event_type,
++			   (int)min_t(unsigned int, skb->len, 6), skb->data);
+ 		err = -EILSEQ;
+ 		goto out;
+ 	}
+@@ -533,6 +535,46 @@
+
+ 	return hci_recv_frame(hdev, skb);
+ }
++
++/* Diagnostic only: one synchronous segment, never a complete download. */
++int qca_lab_first_segment(struct hci_dev *hdev)
++{
++	const struct firmware *fw;
++	const struct tlv_type_hdr *tlv;
++	const struct tlv_type_patch *patch;
++	u32 type_len;
++	int ret;
++
++	ret = request_firmware(&fw, "qca/htbtfw20.tlv", &hdev->dev);
++	if (ret)
++		return ret;
++	if (fw->size <= MAX_SIZE_PER_TLV_SEGMENT ||
++	    fw->size < sizeof(*tlv) + sizeof(*patch)) {
++		ret = -EINVAL;
++		goto out;
++	}
++	tlv = (const struct tlv_type_hdr *)fw->data;
++	patch = (const struct tlv_type_patch *)tlv->data;
++	type_len = le32_to_cpu(tlv->type_len);
++	if ((type_len & 0xff) != TLV_TYPE_PATCH ||
++	    (type_len >> 8) != fw->size - sizeof(*tlv) ||
++	    le16_to_cpu(patch->product_id) != 0x10 ||
++	    le16_to_cpu(patch->rom_build) != 0x0200) {
++		ret = -EINVAL;
++		goto out;
++	}
++	bt_dev_warn(hdev, "LAB one segment begin size=%u; no remainder/NVM",
++		    MAX_SIZE_PER_TLV_SEGMENT);
++	ret = qca_tlv_send_segment(hdev, MAX_SIZE_PER_TLV_SEGMENT, fw->data,
++				   QCA_SKIP_EVT_NONE, QCA_QCA6390);
++	bt_dev_warn(hdev, "LAB one segment end ret=%d; diagnostic abort", ret);
++	if (!ret)
++		ret = -ECANCELED;
++out:
++	release_firmware(fw);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qca_lab_first_segment);
+
+ static int qca_download_firmware(struct hci_dev *hdev,
+ 				 struct qca_fw_config *config,
+--- a/drivers/bluetooth/btqca.h
++++ b/drivers/bluetooth/btqca.h
+@@ -158,6 +158,7 @@
+
+ #if IS_ENABLED(CONFIG_BT_QCA)
+
++int qca_lab_first_segment(struct hci_dev *hdev);
+ int qca_set_bdaddr_rome(struct hci_dev *hdev, const bdaddr_t *bdaddr);
+ int qca_uart_setup(struct hci_dev *hdev, uint8_t baudrate,
+ 		   enum qca_btsoc_type soc_type, struct qca_btsoc_version ver,
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1417,10 +1417,18 @@
+ 	return 0;
+ }
+
++static bool r8s_qca_lab_first_segment;
++module_param_named(r8s_qca_lab_first_segment, r8s_qca_lab_first_segment, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_first_segment, "Lab QCA6390 one synchronous segment at115200, default off");
++
+ static unsigned int qca_get_speed(struct hci_uart *hu,
+ 				  enum qca_speed_type speed_type)
+ {
+ 	unsigned int speed = 0;
++
++	if (r8s_qca_lab_first_segment && speed_type == QCA_OPER_SPEED &&
++	    qca_soc_type(hu) == QCA_QCA6390)
++		return 115200;
+
+ 	if (speed_type == QCA_INIT_SPEED) {
+ 		if (hu->init_speed)
+@@ -1860,6 +1868,9 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
++	if (r8s_qca_lab_first_segment && soc_type != QCA_QCA6390)
++		return -EINVAL;
++
+ 	ret = qca_check_speeds(hu);
+ 	if (ret)
+ 		return ret;
+@@ -1961,6 +1972,14 @@
+ 			goto out;
+ 	}
+
++	if (r8s_qca_lab_first_segment) {
++		if (le32_to_cpu(ver.product_id) != 0x10 ||
++		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
++		    le32_to_cpu(ver.soc_id) != 0x400a0200)
++			return -ENODEV;
++		return qca_lab_first_segment(hdev);
++	}
++
+ 	/* Setup patch / NVM configurations */
+ 	ret = qca_uart_setup(hdev, qca_baudrate, soc_type, ver,
+ 			firmware_name);
+@@ -1987,6 +2006,8 @@
+ 	}
+
+ out:
++	if (r8s_qca_lab_first_segment)
++		return ret ? ret : -ECANCELED;
+ 	if (ret && retries < MAX_INIT_RETRIES) {
+ 		bt_dev_warn(hdev, "Retry BT power ON:%d", retries);
+ 		qca_power_shutdown(hu);
