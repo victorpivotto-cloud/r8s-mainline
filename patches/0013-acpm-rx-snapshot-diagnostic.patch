@@ -1,0 +1,56 @@
+ACPM: add opt-in one-shot normal RX diagnostic
+
+Disabled by default. Capture one successful channel-5 TX/RX word pair;
+log only after ACK clear and sequence release, with transaction lock held.
+Do not change response acceptance or recovery.
+
+---
+--- a/drivers/firmware/samsung/exynos-acpm.c
++++ b/drivers/firmware/samsung/exynos-acpm.c
+@@ -35,6 +35,11 @@
+ #include "exynos-acpm-dvfs.h"
+ #include "exynos-acpm-pmic.h"
+ #include "exynos-acpm-tmu.h"
++
++/* Diagnostic only: manually arm one successful channel-5 RX snapshot. */
++static bool acpm_diag_once;
++module_param_named(single_slot_diag_once, acpm_diag_once, bool, 0600);
++MODULE_PARM_DESC(single_slot_diag_once, "One normal channel-5 TX/RX snapshot; no recovery changes");
+ 
+ #define ACPM_PROTOCOL_SEQNUM		GENMASK(21, 16)
+ 
+@@ -473,7 +478,8 @@
+ {
+ 	struct acpm_info *acpm = achan->acpm;
+ 	u32 seqnum = FIELD_GET(ACPM_PROTOCOL_SEQNUM, xfer->txd[0]);
+-	u32 val;
++	u32 val, tx_word = 0, rx_word = 0;
++	bool snapshot = false;
+ 	int ret;
+ 
+ 	if (!acpm->mbox_intr) {
+@@ -483,6 +489,12 @@
+ 
+ 	ret = readl_poll_timeout(acpm->mbox_intr + ACPM_MBOX_INTSR1, val,
+ 				 val & (1u << achan->id), 20, ACPM_POLL_TIMEOUT_US);
++	if (!ret && achan->id == 5 && achan->mlen >= sizeof(u32) &&
++	    READ_ONCE(acpm_diag_once) && xchg(&acpm_diag_once, false)) {
++		tx_word = xfer->txd[0];
++		rx_word = readl(achan->rx.base);
++		snapshot = true;
++	}
+ 	if (!ret && xfer->rxcnt && xfer->rxd)
+ 		memcpy_fromio(xfer->rxd, achan->rx.base,
+ 			      xfer->rxcnt * sizeof(*xfer->rxd));
+@@ -491,6 +503,11 @@
+ 	/* Flush the ACK clear before the next owner can issue a doorbell. */
+ 	readl(acpm->mbox_intr + ACPM_MBOX_INTSR1);
+ 	clear_bit_unlock(seqnum - 1, achan->bitmap_seqnum);
++	/* Print only after ACK clear; the transaction lock is still held. */
++	if (snapshot)
++		dev_info(acpm->dev, "single-slot snapshot tx0=%08x rx0=%08x txseq=%u rxseq=%u rxcnt=%zu\n",
++			 tx_word, rx_word, seqnum,
++			 (u32)FIELD_GET(ACPM_PROTOCOL_SEQNUM, rx_word), xfer->rxcnt);
+ 	return ret;
+ }
+ 

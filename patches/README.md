@@ -61,3 +61,10 @@ memory word in the existing channel initialization log, with an offset
 assertion. arm64 build, patch reproduction and RAM boot passed; the active
 DVFS descriptor reports word_0c=2 with poll0/qlen1. It does not fix late ACK or alter DVFS. Baseline and
 interpretation are in `docs/ACPM-DVFS-TERMICA.md`.
+
+
+`0013-acpm-rx-snapshot-diagnostic.patch` adds a disabled-by-default, root-only
+one-shot channel-5 TX/RX snapshot after a normal ACK. arm64 object build,
+source-function mock and patch reproduction passed; hardware validation is
+pending. Printing happens after ACK cleanup while the transaction mutex is
+held, so it can affect timing. This does not fix stale ACK acceptance.

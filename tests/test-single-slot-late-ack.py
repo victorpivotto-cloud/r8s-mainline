@@ -33,10 +33,20 @@ typedef uint32_t u32;
 #define GENMASK(h,l) (((~0u) >> (31-(h))) & ((~0u) << (l)))
 #define FIELD_GET(mask,value) (((value)&(mask)) >> __builtin_ctz(mask))
 struct acpm_info { unsigned char *mbox_intr; };
-struct acpm_chan { struct acpm_info *acpm; u32 id; unsigned long *bitmap_seqnum; struct { void *base; } rx; };
-struct acpm_xfer { u32 *txd,*rxd; unsigned int rxcnt; };
+struct acpm_chan { struct acpm_info *acpm; u32 id; unsigned long *bitmap_seqnum; struct { void *base; } rx; unsigned int mlen; };
+struct acpm_xfer { u32 *txd,*rxd; size_t rxcnt; };
 static unsigned char registers[64];
 static int inject_timeout;
+static bool acpm_diag_once __attribute__((unused));
+static unsigned int diag_logs __attribute__((unused));
+static u32 diag_tx __attribute__((unused)),diag_rx __attribute__((unused));
+#define xchg(ptr,value) ({ bool old=*(ptr); *(ptr)=(value); old; })
+#define READ_ONCE(value) (value)
+#define WRITE_ONCE(value,new_value) ((value)=(new_value))
+#define dev_info(dev,format,tx,rx,...) do { \
+    (void)(format); diag_logs++; diag_tx=(tx); diag_rx=(rx); \
+    assert(readl(registers+ACPM_MBOX_INTSR1)==0); \
+} while (0)
 static u32 readl(void *address) { u32 v; memcpy(&v,address,4); return v; }
 static void writel(u32 value,void *address) {
     if(address == registers+ACPM_MBOX_INTCR1) {
@@ -54,7 +64,7 @@ int main(void) {
  unsigned long bitmap=1;
  u32 tx[4]={1u<<16,0,0,0}, rx[4]={1u<<16,1066000,0,0}, output[4]={0};
  struct acpm_info info={registers};
- struct acpm_chan chan={&info,5,&bitmap,{rx}};
+ struct acpm_chan chan={&info,5,&bitmap,{rx},16};
  struct acpm_xfer transfer={tx,output,4};
  u32 ack=1u<<5;
  memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
@@ -81,6 +91,22 @@ int main(void) {
  return 0;
 }
 '''
+if 'acpm_diag_once' in function:
+    cases=r'''
+ // An armed timeout is not consumed; a later successful ACK logs once after clear.
+ acpm_diag_once=true; inject_timeout=1; tx[0]=4u<<16; bitmap=1ul<<3;
+ assert(acpm_wait_for_singleslot_response(&chan,&transfer)==-ETIMEDOUT);
+ assert(acpm_diag_once && diag_logs==0);
+ inject_timeout=0; rx[0]=4u<<16; bitmap=1ul<<3;
+ memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
+ assert(acpm_wait_for_singleslot_response(&chan,&transfer)==0);
+ assert(!acpm_diag_once && diag_logs==1 && diag_tx==tx[0] && diag_rx==rx[0]);
+ tx[0]=5u<<16; bitmap=1ul<<4; memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
+ assert(acpm_wait_for_singleslot_response(&chan,&transfer)==0 && diag_logs==1);
+ puts("CONTROL: opt-in capture consumes one success, preserves timeout arm, logs after ACK clear");
+'''
+    main=main.replace(' return 0;',cases+' return 0;')
+
 with tempfile.TemporaryDirectory(prefix='acpm-late-ack-') as directory:
     p=Path(directory);c=p/'probe.c';c.write_text(mock.split('static unsigned char')[0]+'\n'.join(constants)+'\nstatic unsigned char'+mock.split('static unsigned char',1)[1]+function+main)
     subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',str(c),'-o',str(p/'probe')],check=True)

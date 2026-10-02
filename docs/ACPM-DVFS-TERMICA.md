@@ -263,3 +263,30 @@ Sensores/failsafe/bateria e limites voltaram normalmente após o boot, sem
 novos erros DVFS. Próximo passo é observar TX/RX numa transação normal com
 instrumentação limitada; não injetar timeout nem adotar recuperação sem
 correlação comprovada. A causa do reset continua aberta.
+
+
+### Captura única de RX preparada, ainda sem teste no aparelho
+
+`patches/0013-acpm-rx-snapshot-diagnostic.patch` é diagnóstico opt-in,
+sobre o provider com0012 (baselineSHA256 `4f30cb43e2d096f1378f971b1571c776a689bb46aa0a5e78322d71f29e317ede`).
+O parâmetro root-only `single_slot_diag_once` começa falso. Quando armado,
+um ACK normal bem-sucedido do canal5 captura TXword0 e RXword0 antes da
+limpeza. `xchg` consome a solicitação uma única vez. Timeout mantém o pedido
+armado; isso não modifica o retorno ou a aceitação de ACKs.
+
+O log sai depois de limpar ACK/readback/ownership, ainda sob mutex da
+transação. Portanto existe efeito de observação na duração desse comando;
+não usar essa captura para comprovar ausência de uma corrida de timing.
+Desarmar explicitamente o parâmetro se nenhum comando normal o consumir.
+Não há injeção de timeout, mudança de relógio ou escrita adicional no firmware.
+
+Revisão do Claude identificou tipos de formato; corrigidos e confirmados
+na compilação arm64 sem avisos. O mock da função real testa opt-in,
+consumo único e log após limpar ACK; os casos de ACK tardio continuam
+reproduzindo a lacuna. Patch reproduz o fonte compilado e checkpatch passou.
+**Ainda não aplicado a uma imagem em boot: #27 tem somente0012.**
+
+RXword0 não é necessariamente payload recebido pelo cliente quando
+`rxcnt=0`. Sequências observadas, iguais ou diferentes, precisarão de
+interpretação do protocolo; esse patch não recupera o canal nem corrige
+ACK tardio. Não publicar logs brutos de captura.
