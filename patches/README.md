@@ -65,6 +65,7 @@ interpretation are in `docs/ACPM-DVFS-TERMICA.md`.
 
 `0013-acpm-rx-snapshot-diagnostic.patch` adds a disabled-by-default, root-only
 one-shot channel-5 TX/RX snapshot after a normal ACK. arm64 object build,
-source-function mock and patch reproduction passed; hardware validation is
-pending. Printing happens after ACK cleanup while the transaction mutex is
+source-function mock, patch reproduction and RAM boot passed. One normal
+no-payload transaction showed matching TX/RX sequence; freshness and timeout
+recovery remain unverified. Printing happens after ACK cleanup while the transaction mutex is
 held, so it can affect timing. This does not fix stale ACK acceptance.

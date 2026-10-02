@@ -10,7 +10,8 @@ Este documento substitui o resumo histórico de setembro.
   Mock concorrente reproduz a falha anterior. Respostas tardias após timeout
   continuam sem solução comprovada; não extrapolar o mock para firmware.
   Diagnóstico em RAM observou canal DVFS5 com word_0c=2, poll0 e slot único,
-  compatível com TYPE_BUFFER vendor; echoRX ainda não foi confirmado.
+  compatível com TYPE_BUFFER vendor. Uma captura normal sem payload mostrou
+  sequência TX/RX igual; frescor e recuperação após timeout seguem abertos.
 - Térmica: seis sensores, cooling passivo CPU e failsafe por sensor/heartbeat.
   Injeção de falha, ausência de polling e unload/reload foram testados.
   Calibração e desligamento crítico não foram comprovados.

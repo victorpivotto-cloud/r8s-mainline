@@ -265,7 +265,7 @@ instrumentação limitada; não injetar timeout nem adotar recuperação sem
 correlação comprovada. A causa do reset continua aberta.
 
 
-### Captura única de RX preparada, ainda sem teste no aparelho
+### Captura única de RX e resultado em RAM
 
 `patches/0013-acpm-rx-snapshot-diagnostic.patch` é diagnóstico opt-in,
 sobre o provider com0012 (baselineSHA256 `4f30cb43e2d096f1378f971b1571c776a689bb46aa0a5e78322d71f29e317ede`).
@@ -284,9 +284,26 @@ Revisão do Claude identificou tipos de formato; corrigidos e confirmados
 na compilação arm64 sem avisos. O mock da função real testa opt-in,
 consumo único e log após limpar ACK; os casos de ACK tardio continuam
 reproduzindo a lacuna. Patch reproduz o fonte compilado e checkpatch passou.
-**Ainda não aplicado a uma imagem em boot: #27 tem somente0012.**
+O kernel com0013 passou em boot remoto somente em RAM. A captura começou
+desativada, foi armada uma vez depois do boot e consumida por atividade
+normal do governador; nenhum timeout ou carga foram provocados.
 
 RXword0 não é necessariamente payload recebido pelo cliente quando
 `rxcnt=0`. Sequências observadas, iguais ou diferentes, precisarão de
 interpretação do protocolo; esse patch não recupera o canal nem corrige
 ACK tardio. Não publicar logs brutos de captura.
+
+
+Na única amostra desse teste, `rxcnt=0` e as sequências TX/RX de seis bits
+coincidiram. O parâmetro se desarmou e foi confirmado emN ao final.
+Sensores/failsafe/bateria, máximos de frequência e unidades permaneceram
+normais, sem novos erros DVFS. Isso demonstra que havia um valor RX legível
+com sequência correspondente nessa amostra, sem exigir payload no cliente.
+
+Uma coincidência de seis bits não prova frescor: a sequência pode circular
+e um valor antigo coincidir. Ainda faltam amostras distintas e interpretação
+do comportamento após timeout. Não ativar comparação obrigatória, declarar
+recuperação ou atribuir o reset a ACK tardio com base nesse teste.
+Caminho do parâmetro observado nesse build:
+`/sys/module/acpm_protocol/parameters/single_slot_diag_once`.
+ManterN fora de uma captura deliberada e limitada.
