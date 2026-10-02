@@ -317,3 +317,36 @@ Battery health was Good at34.1°C, SoC sensors were at most53°C, and full new
 kernel logs contained no warning, BUG, Oops, panic or late ACK. No partition
 was written; Bluetooth operation, audio/camera and24h qualification remain
 pending.
+
+## Contrato vendor do baud e comparação a 1 Mbaud
+
+Na [referência HAL](https://github.com/comprehensive9/vendor_qcom_proprietary/blob/36fc163a534963a5b3af52186af5efcc63401ad2/bluetooth/hidl_transport/bt/1.0/default/patch_dl_manager.cpp),
+`SetBaudRateReq` envia cinco bytes H4 para opcode `0xfc48`, com um byte de
+velocidade. Após trocar o host e liberar RTS, lê Command Complete; no modo
+unified, `ReadHciEvent` encaminha a resposta para `GetVsHciEvent`. Esse caminho
+exige **sucesso vendor 1**, no offset 6 incluindo H4, em vez do status HCI
+genérico 0. O modo legado usa offset 4 e resposta vendor `0x92`. Isso evita
+interpretar um eventual ACK com a regra errada; não explica as fases com
+zero RX. Não alterar o parser sem receber e validar essa resposta. O espelho
+não comprova a HAL Samsung exata.
+
+Uma comparação nova a [1 Mbaud](../experiments/qca-rts-1m/README.md) manteve o
+pulso GPIO e a ordem de espera/drenagem. Com o clock **declarado** de 200 MHz,
+o divisor total 200 tem erro nominal zero. A API reportou 1000000, mas a
+consulta também expirou; o retorno apenas do host a 115200 recebeu versão
+válida. TX aumentou 20 e RX 42; somente as duas fases de versão inicial/final
+receberam bytes, sem ACK de baud ou erro H4. Guardas, retiradas e restauração
+de módulos/limites/LOW passaram sem warnings.
+
+Essa rodada não sustenta a quantização de aproximadamente 1% dos bauds altos
+como explicação suficiente. Não mede clock/baud elétrico nem prova suporte
+1 Mbaud por esse ROM. A leitura passiva do DT/clk_summary continua mostrando
+um fixed-clock, sem modelo CMU independente. Não repetir a matriz; priorizar
+evidência do comando/estado do controlador e sinais/clock físicos.
+
+Ao final dessa comparação, o kernel e DT de controle foram restaurados em
+RAM, com hog RTS LOW, módulos/hashes/srcversion originais, flags experimentais
+ausentes, limites originais e máscaras de falha zero. Nenhuma unidade falha
+ou diagnóstico ativo permaneceu; logs novos sem warnings. Nenhuma partição
+foi gravada. Bluetooth continua sem HCI funcional; a qualificação de 24 h
+permanece adiada.
