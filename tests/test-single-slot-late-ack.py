@@ -18,14 +18,17 @@ source = args.source.read_text()
 name = 'acpm_wait_for_singleslot_response'
 start = source.index('static int '+name+'(')
 function = source[start:source.index('\n}', start)+2]
+prepare_start = source.index('static int acpm_prepare_xfer(')
+prepare = source[prepare_start:source.index('\n}', prepare_start)+2]
 constants=[]
-for symbol in ('ACPM_PROTOCOL_SEQNUM','ACPM_POLL_TIMEOUT_US','ACPM_MBOX_INTCR1','ACPM_MBOX_INTSR1'):
+for symbol in ('ACPM_PROTOCOL_SEQNUM','ACPM_POLL_TIMEOUT_US','ACPM_MBOX_INTCR1','ACPM_MBOX_INTSR1','ACPM_SEQNUM_MAX'):
     match=re.search(r'^#define\s+'+symbol+r'\s+(.+)$',source,re.MULTILINE)
     if not match: parser.error('missing constant '+symbol)
     constants.append('#define '+symbol+' '+match.group(1))
 mock=r'''
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -34,10 +37,17 @@ typedef uint32_t u32;
 #define USEC_PER_MSEC 1000
 #define GENMASK(h,l) (((~0u) >> (31-(h))) & ((~0u) << (l)))
 #define FIELD_GET(mask,value) (((value)&(mask)) >> __builtin_ctz(mask))
+#define FIELD_PREP(mask,value) (((value) << __builtin_ctz(mask)) & (mask))
+#define WARN_ON_ONCE(value) (value)
+#define dev_err_ratelimited(...) ((void)0)
 struct acpm_info { unsigned char *mbox_intr; };
-struct acpm_chan { struct acpm_info *acpm; u32 id; unsigned long *bitmap_seqnum; struct { void *base; } rx; unsigned int mlen; };
+struct acpm_rx_data { bool completed; u32 *cmd; size_t cmdcnt,rxcnt; };
+struct acpm_chan { struct acpm_info *acpm; u32 id; unsigned long *bitmap_seqnum; struct { void *base; } rx; unsigned int mlen,seqnum; struct acpm_rx_data *rx_data; };
 struct acpm_xfer { u32 *txd,*rxd; size_t rxcnt; };
 static unsigned char registers[64];
+_Static_assert(ACPM_SEQNUM_MAX==64,"this characterization assumes sequences 1..63");
+_Static_assert(sizeof(unsigned long)*CHAR_BIT>=ACPM_SEQNUM_MAX-1,
+               "mock bitmap requires a host word covering all sequences");
 _Static_assert(ACPM_MBOX_INTSR1+sizeof(u32)<=sizeof registers &&
                ACPM_MBOX_INTCR1+sizeof(u32)<=sizeof registers,
                "mock register offsets outside storage");
@@ -72,6 +82,16 @@ static void writel(u32 value,void *address) {
 }
 #define memcpy_fromio(dst,src,n) memcpy(dst,src,n)
 static void clear_bit_unlock(unsigned int n,unsigned long *bits) { *bits &= ~(1ul<<n); }
+static unsigned long find_next_zero_bit(unsigned long *bits,unsigned long size,unsigned long start) {
+    for(unsigned long i=start;i<size;i++) if(!(*bits & (1ul<<i))) return i;
+    return size;
+}
+static unsigned long find_first_zero_bit(unsigned long *bits,unsigned long size) {
+    return find_next_zero_bit(bits,size,0);
+}
+static bool test_and_set_bit_lock(unsigned long bit,unsigned long *bits) {
+    bool old=!!(*bits & (1ul<<bit)); *bits |= 1ul<<bit; return old;
+}
 #define readl_poll_timeout(address,val,condition,delay,timeout) \
  ({ (val)=readl(address); (void)(delay); (void)(timeout); inject_timeout || !(condition) ? -ETIMEDOUT : 0; })
 '''
@@ -80,7 +100,7 @@ int main(void) {
  unsigned long bitmap=1;
  u32 tx[4]={1u<<16,0,0,0}, rx[4]={1u<<16,1066000,0,0}, output[4]={0};
  struct acpm_info info={registers};
- struct acpm_chan chan={&info,5,&bitmap,{rx},16};
+ struct acpm_chan chan={.acpm=&info,.id=5,.bitmap_seqnum=&bitmap,.rx={rx},.mlen=16};
  struct acpm_xfer transfer={tx,output,4};
  u32 ack=1u<<5;
  memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
@@ -147,7 +167,41 @@ interleavings=r'''
 '''
 main=main.replace(' return 0;',interleavings+' return 0;')
 
+allocator_cycle=r'''
+ // Use the real allocator and timeout helper, not a manually reused sequence.
+ struct acpm_rx_data slots[ACPM_SEQNUM_MAX]={0};
+ u32 slot_commands[ACPM_SEQNUM_MAX][4]={0};
+ for(unsigned int i=0;i<ACPM_SEQNUM_MAX;i++) {
+     slots[i].cmd=slot_commands[i]; slots[i].cmdcnt=4;
+ }
+ chan.rx_data=slots; chan.seqnum=0; bitmap=0; tx[0]=0;
+ assert(acpm_prepare_xfer(&chan,&transfer)==0 && chan.seqnum==1 && bitmap==1);
+ u32 expired_word=tx[0];
+ assert(FIELD_GET(ACPM_PROTOCOL_SEQNUM,expired_word)==1);
+ inject_timeout=1;
+ assert(acpm_wait_for_singleslot_response(&chan,&transfer)==-ETIMEDOUT && bitmap==0);
+ inject_timeout=0;
+ for(unsigned int expected=2;expected<ACPM_SEQNUM_MAX;expected++) {
+     tx[0]=0; // Fresh command, as required by the OR-based sequence insertion.
+     assert(acpm_prepare_xfer(&chan,&transfer)==0 && chan.seqnum==expected);
+     assert(bitmap==(1ul<<(expected-1)));
+     rx[0]=tx[0]; memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
+     assert(acpm_wait_for_singleslot_response(&chan,&transfer)==0 && bitmap==0);
+ }
+ tx[0]=0; tx[1]=0x12345678u;
+ assert(acpm_prepare_xfer(&chan,&transfer)==0 && chan.seqnum==1 && bitmap==1);
+ // Assume the expired response arrives now, after the allocator has wrapped.
+ rx[0]=expired_word; rx[1]=0xdeadbeefu;
+ memcpy(registers+ACPM_MBOX_INTSR1,&ack,4);
+ assert(FIELD_GET(ACPM_PROTOCOL_SEQNUM,rx[0])==chan.seqnum);
+ assert(acpm_wait_for_singleslot_response(&chan,&transfer)==0 && bitmap==0);
+ assert(FIELD_GET(ACPM_PROTOCOL_SEQNUM,output[0])==1 && output[1]==0xdeadbeefu);
+ printf("MODELED: real allocator reused expired sequence after %u other completions; late response still assumed\n",
+        ACPM_SEQNUM_MAX-2);
+'''
+main=main.replace(' return 0;',allocator_cycle+' return 0;')
+
 with tempfile.TemporaryDirectory(prefix='acpm-late-ack-') as directory:
-    p=Path(directory);c=p/'probe.c';c.write_text(mock.split('static unsigned char')[0]+'\n'.join(constants)+'\nstatic unsigned char'+mock.split('static unsigned char',1)[1]+function+main)
+    p=Path(directory);c=p/'probe.c';c.write_text(mock.split('static unsigned char')[0]+'\n'.join(constants)+'\nstatic unsigned char'+mock.split('static unsigned char',1)[1]+prepare+function+main)
     subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',str(c),'-o',str(p/'probe')],check=True)
     subprocess.run([str(p/'probe')],check=True)

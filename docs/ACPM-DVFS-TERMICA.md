@@ -345,7 +345,7 @@ quatro coincidências normais ou atribuir a elas a causa do reset.
 
 ### Interleavings modelados e rechecagem da fila vendor
 
-O mock `tests/test-single-slot-late-ack.py` agora inclui dois casos `MODELED`,
+O mock `tests/test-single-slot-late-ack.py` inclui dois primeiros casos `MODELED`,
 executados contra a função C real, com e sem0013:
 
 - Publicar uma resposta nova depois da cópia de RX e imediatamente antes de
@@ -375,3 +375,32 @@ trabalho após clear. O handler não polling limpa o bit antes de acordar a
 thread; portanto sua existência também não estabelece publicação RX/ACK
 para o slot único do canal5. Não transportar a rechecagem de fila para esse
 slot, que não oferece os mesmos índices, nem gerar interrupção manual no S20.
+
+### Ciclo do alocador real após timeout
+
+O campo tem seis bits, mas `acpm_prepare_xfer` reserva apenas sequências1..63
+(bitmap0..62), com `ACPM_SEQNUM_MAX=64` e tamanho do pool igual a63.
+O helper de slot único libera o bit também em timeout. O caminho de envio
+escreve o TX e toca a doorbell sob mutex, mas não mantém uma marca de comando
+expirado que impeça seu número de voltar ao pool. O mutex impede concorrência
+entre os chamadores atuais; não demonstra que o firmware encerrou o comando.
+
+Um terceiro caso do mock extrai e compila `acpm_prepare_xfer` junto ao helper
+de espera, em vez de atribuir manualmente a sequência repetida. Partindo de
+pool vazio, a sequência1 expira, as sequências2..63 concluem no modelo e a
+próxima alocação volta à1. São62 outras conclusões entre timeout e reutilização.
+Cada solicitação começa com TXword0 novo, pois a inserção de sequência usa OR.
+O teste exige um word do host que comporte o bitmap e fornece buffers RX
+locais válidos; não executa primitivas de concorrência reais do kernel.
+
+Depois da reutilização, o modelo injeta a resposta expirada com a mesma
+sequência e uma assinatura de payload antigo. O helper aceita esse payload.
+A reutilização é verificada pelo código real; a latência do firmware até esse
+ponto é uma premissa explícita, sem evidência de que ocorra no S20. O teste
+não mede tempo de circulação, nem valida recuperação ou todos os interleavings.
+Passou contra provider0012 e0013, mantendo os controles anteriores.
+
+Sem um limite comprovado de vida de uma resposta, só aguardar alguns comandos
+ou comparar seis bits não estabelece frescor. Quarentena também exigiria uma
+condição confiável de liberação e tratamento de pool esgotado; não aplicar uma
+mudança desse tipo no hardware a partir deste modelo.
