@@ -1,0 +1,86 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1189,10 +1189,10 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab3200000;
++static bool r8s_qca_lab_baud20_3200;
+ static unsigned int r8s_lab_selected_baud;
+-module_param_named(r8s_qca_lab3200000, r8s_qca_lab3200000, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab3200000, "Lab QCA6390 version115200 then flow-gated3.2M, default off");
++module_param_named(r8s_qca_lab_baud20_3200, r8s_qca_lab_baud20_3200, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_baud20_3200, "Lab QCA6390 version115200 then flow-gated3.2M, default off");
+
+ static int qca_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+@@ -1201,7 +1201,7 @@
+
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab3200000 && skb->len >= 5 &&
++	if (r8s_qca_lab_baud20_3200 && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1377,6 +1377,15 @@
+ 		usleep_range(1000, 10000);
+ 		break;
+
++	case QCA_QCA6390:
++		if (r8s_qca_lab_baud20_3200) {
++			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
++			msleep(20);
++		} else {
++			msleep(300);
++		}
++		break;
++
+ 	default:
+ 		msleep(300);
+ 	}
+@@ -1389,7 +1398,7 @@
+ 	if (hu->serdev) {
+ 		unsigned int selected = serdev_device_set_baudrate(hu->serdev, speed);
+
+-		if (r8s_qca_lab3200000 && qca_soc_type(hu) == QCA_QCA6390) {
++		if (r8s_qca_lab_baud20_3200 && qca_soc_type(hu) == QCA_QCA6390) {
+ 			WRITE_ONCE(r8s_lab_selected_baud, selected);
+ 			bt_dev_warn(hu->hdev, "LAB baud API requested=%u reported=%u", speed, selected);
+ 		}
+@@ -1441,7 +1450,7 @@
+ {
+ 	unsigned int speed = 0;
+
+-	if (r8s_qca_lab3200000 && speed_type == QCA_OPER_SPEED &&
++	if (r8s_qca_lab_baud20_3200 && speed_type == QCA_OPER_SPEED &&
+ 	    qca_soc_type(hu) == QCA_QCA6390)
+ 		return 3200000;
+
+@@ -1883,7 +1892,7 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab3200000 &&
++	if (r8s_qca_lab_baud20_3200 &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3200000))
+@@ -1940,7 +1949,7 @@
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab3200000) {
++	if (r8s_qca_lab_baud20_3200) {
+ 		WRITE_ONCE(r8s_lab_selected_baud, 0);
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 		if (!ret && READ_ONCE(r8s_lab_selected_baud) != 115200)
+@@ -2067,7 +2076,7 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab3200000) {
++	if (r8s_qca_lab_baud20_3200) {
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
+ 		return ret ? ret : -ECANCELED;
+ 	}

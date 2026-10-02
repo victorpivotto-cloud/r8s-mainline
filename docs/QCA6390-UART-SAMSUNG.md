@@ -48,7 +48,7 @@ apenas do host a 115200, se a consulta3M expirasse. Não enviou patch/NVM.
 
 Versão a 115200 respondeu; versão3M expirou em cerca2s; a consulta após retornar
 apenas o host a 115200 respondeu em cerca de 4 ms, com os mesmos IDs/Patch 0x0d2b.
-Não houve Command Complete 0xfc48 capturado. TX/RX cresceram20/42bytes.
+Não houve Command Complete 0xfc48 capturado. TX/RX cresceram 20/42 bytes.
 Isso indica comunicação compatível com 115200 após a solicitação de baud;
 não prova por que a transição falhou nem que nunca houve outro estado.
 Sem captura física, pacote atrasado e enquadramento perdido não estão excluídos.
@@ -106,3 +106,53 @@ confirmada por hash/srcversion. O parâmetro UART voltou a N antes da recarga.
 O kernel de controle foi restaurado em RAM e conferido, sem flags de laboratório,
 com limites originais, sensores normais e zero unidades falhas. Partições,
 firmware, DT, GPIO, clock CMU e Wi-Fi permaneceram preservados.
+
+
+## Comparação posterior: reduzir o atraso pós-drenagem para 20 ms
+
+O [laboratório de 20 ms](../experiments/qca-baud20/README.md) alterou somente
+o atraso pós-drenagem de cada candidato anterior. Não alterou os divisores,
+GPIO, clock, firmware ou parser. Primeiro usou 3M no kernel de controle;
+depois 3,2M no kernel UART instrumentado, em RAM.
+
+| Baud solicitado ao host | Atraso solicitado após drenagem | Consulta em baud alto | Consulta após host voltar a 115200 | ACK 0xfc48 capturado |
+|---|---|---|---|---|
+|3M|300 ms|timeout -110|respondeu|nenhum|
+|3,2M|300 ms|timeout -110|respondeu|nenhum|
+|3M|20 ms|timeout -110|respondeu|nenhum|
+|3,2M|20 ms|timeout -110|respondeu|nenhum|
+
+Na rodada de 3,2M/20 ms, a API e a UART confirmaram 3200000 com UBRDIV=2 e
+DIVSLOT=14. Nas duas rodadas de 20 ms, a consulta começou cerca de 24 ms após
+o log posterior à chamada de drenagem. `msleep(20)` não garante 20 ms exatos;
+esse intervalo também inclui mudança de baud e operações do laboratório.
+A versão final respondeu em cerca de 3,5–3,7 ms, com os mesmos IDs/Patch 0x0d2b.
+TX/RX cresceram 20/42 bytes e MGMT não apresentou controladores. Sem TLV/NVM/IBS.
+
+As guardas e a restauração dos originais passaram nas duas rodadas; a rodada
+3,2M retornou ao kernel de controle em RAM. Build W=1 sem avisos, fontes
+preservadas e sequência dos patches públicos conferida contra a fonte compilada.
+Não atribuir revisão concluída a Claude nesta rodada: a consulta de código
+público expirou sem resposta; a revisão foi feita localmente.
+
+**Reduzir apenas esse atraso não resolveu a comunicação nos dois bauds.**
+Isso não exclui toda temporização: o Linux espera drenagem antes do atraso;
+a HAL espera 20 ms antes de `tcdrain`, troca o host e lê Command Complete.
+O laboratório ainda não espera o ACK síncrono e não demonstra pulso RTS.
+`serdev_device_wait_until_sent` é void, sem indicação de sucesso físico.
+No modo FIFO, `s3c24xx_serial_tx_empty` confere UFSTAT, sem ler o estado do
+registrador de deslocamento nesse ramo; não afirmar que a chamada prova transmissão no fio.
+Isso também não prova que a drenagem causou a falha.
+
+Próximo: examinar a recepção/enquadramento do ACK específico 0xfc48 e o contrato
+de eventos da HAL/controlador. A ausência atual é no parser H4, não uma medida
+elétrica. Não repetir a matriz, relaxar parser, enviar firmware completo ou
+mudar clocks/GPIO/atrasos por tentativa sem hipótese e recuperação registradas.
+
+O caminho `qca_recv` registra `Frame reassembly failed` quando `h4_recv_buf`
+retorna erro. Esse registro não apareceu nas duas capturas de 20 ms. Isso é
+apenas ausência do erro reportado nesse caminho; não prova ausência de erros
+na UART, de descarte anterior ao parser ou de uma resposta parcial. O próximo
+laboratório deve distinguir contadores da UART, bytes entregues ao serdev/H4 e
+eventos completos por fase, sem registrar payloads ou endereços de outros
+comandos. Nenhum ensaio dessa instrumentação foi executado nesta rodada.
