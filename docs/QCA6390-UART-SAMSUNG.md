@@ -412,3 +412,25 @@ Este rastreamento identifica recursos para uma futura implementação do
 provider. Não mede o mux/divisor ou o clock atual, nem substitui a
 verificação da revisão do silício e do DT aplicado. Nenhum clock, CMU, gate,
 DT ou kernel foi alterado; o controle continua usando seu fixed-clock.
+
+### Recursos de registro para implementar o provider
+
+A [fonte SFR da mesma revisão](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/exynos9830/cmucal-sfr.c)
+declara CMU TOP em `0x1a330000` e PERIC1 em `0x10700000`, ambos com
+janela `0x8000`. Os offsets abaixo são relativos à respectiva base:
+
+| Recurso | CMU | Offset | Campo |
+|---|---|---|---|
+| Mux `CLKCMU_PERIC1_IP` | TOP | `0x10d8` | seleção bit 0; busy bit 16 |
+| Gate `CLKCMU_PERIC1_IP` | TOP | `0x20d8` | manual bit 20; CG_VAL bit 21 |
+| Divisor `CLKCMU_PERIC1_IP` | TOP | `0x18d0` | DIVRATIO bits 3:0; busy bit 16 |
+| Mux `UART_BT_USER` | PERIC1 | `0x0610` | seleção bit 4; busy bit 16 |
+| Auto gating do mux UART | PERIC1 | `0x0614` | bit 28 |
+| Divisor `UART_BT` | PERIC1 | `0x1800` | DIVRATIO bits 3:0; busy bit 16 |
+
+A tabela CAL também mostra que `CLKCMU_PERIC1_IP` vem de mux → gate →
+divisor no TOP, com pais `PLL_SHARED0_DIV4` ou `PLL_SHARED2_DIV2`.
+`OSCCLK_PERIC1` é declarado como 26 MHz. Uma futura implementação precisa
+modelar essa cadeia e validar os campos; o mux USER usa bit 4, diferente do
+mux TOP. Esses dados são referências de fonte, sem leitura ou escrita de
+registradores no aparelho e sem confirmação da revisão CAL aplicável.
