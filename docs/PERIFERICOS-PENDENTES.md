@@ -149,6 +149,44 @@ Próximo trabalho: driver mínimo com reguladores/power sequencing e decoder
 corretos, sem atualização de firmware/calibração; depois validação física de
 pressionar/mover/soltar e ausência de IRQ storm. Ainda não foi implementado.
 
+### Modelo de decoder no host
+
+`experiments/zt7650_event_decoder.py` implementa somente a decodificação de um
+lote completo de coordenadas em memória, sem I2C, GPIO, IRQ ou eventos input.
+A fonte vendor usa `tid` diretamente como índice, incluindo zero; estados
+NONE/PRESS/MOVE/RELEASE são0/1/2/3. O modelo usa máscaras explícitas, evitando
+depender do layout de bitfields do compilador, e preserva pressão/type raw.
+
+Políticas experimentais: no máximo10 pacotes, count do primeiro pacote
+igual ao tamanho recebido, ID menor que o número de slots e coordenadas
+dentro dos limites inclusivos dos eixos. Falha em qualquer pacote rejeita
+todo o lote antes de retornar eventos. Não se presume countdown nos pacotes
+restantes nem se rejeitam IDs repetidos sem contrato documentado.
+NONE conta no tamanho do lote, mas é omitido sem validar ID/coordenadas.
+O limite9 refere-se a eventos adicionais ao primeiro, não a9 pacotes totais.
+A rejeição do lote difere do clamp de count da referência vendor.
+
+Os testes sintéticos incluem vetor independente de nibbles X/Y e touch_type,
+IDzero, estados ativos, lote máximo, truncamento/count inválido, ID fora do
+limite, erro em pacote posterior e limite inclusivo de coordenadas. Eles
+verificam o modelo de bytes; não validam o protocolo executado pelo chip.
+Dez casos passaram no host. A revisão pública do Claude ajudou a ampliar
+os casos negativos; a sugestão de reduzir o total a9 foi descartada após
+conferir que o vendor testa `left_event > multi_fingers - 1` após o primeiro.
+
+O modelo aplica limites de coordenadas também a RELEASE. Isso é uma política
+estrita ainda não validada; um driver real precisará decidir como liberar
+slots mesmo quando coordenadas de soltura não forem utilizáveis. Gestos,
+proximidade/palma e pressão zero precisam de política input separada.
+Não vincular esse script ao input nem anunciar toque funcional com base nos
+testes. O driver kernel, power sequencing e validação física continuam pendentes.
+
+Execução no host, sem telefone:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test-zt7650-event-decoder.py -v
+```
+
 ## Som interno
 
 A árvore Samsung contém ABOX v3 para Exynos9830. O [probe](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/sound/soc/samsung/abox/abox.c)
