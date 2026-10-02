@@ -434,3 +434,18 @@ divisor no TOP, com pais `PLL_SHARED0_DIV4` ou `PLL_SHARED2_DIV2`.
 modelar essa cadeia e validar os campos; o mux USER usa bit 4, diferente do
 mux TOP. Esses dados são referências de fonte, sem leitura ou escrita de
 registradores no aparelho e sem confirmação da revisão CAL aplicável.
+
+### Seleção CAL na configuração pública do r8s
+
+O [Makefile CAL](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/Makefile)
+seleciona `exynos9830/cal_data.o` quando `CONFIG_SOC_EXYNOS9830_EVT0`
+está desabilitado; quando habilitado, seleciona `exynos9830_evt0/cal_data.o`.
+O [defconfig r8s](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/arch/arm64/configs/extreme_r8s_defconfig)
+habilita `CONFIG_SOC_EXYNOS9830` e `CONFIG_MODEL_R8S`, sem habilitar EVT0.
+O [Kconfig da plataforma](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/arch/arm64/Kconfig.platforms)
+define EVT0 com padrão `n`. Isso apoia o uso da tabela `exynos9830` como
+referência desse defconfig, sujeito a fragmentos ou overrides no build.
+O [cal_data.c selecionado](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/exynos9830/cal_data.c)
+inclui diretamente as tabelas node, SFR, VCLK e LUT auditadas acima.
+Essa seleção de fonte não identifica a revisão física do telefone nem o
+estado de seus clocks após boot; essas verificações continuam pendentes.
