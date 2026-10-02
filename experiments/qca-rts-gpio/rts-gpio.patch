@@ -8,15 +8,17 @@
  #include <linux/atomic.h>
  #include <linux/clk.h>
  #include <linux/completion.h>
-@@ -224,6 +225,7 @@
+@@ -224,7 +225,9 @@
  };
 
  struct qca_serdev {
-+	struct gpio_desc *lab_rts;
++	/* serdev callbacks cast drvdata to hci_uart: this must stay first. */
  	struct hci_uart	 serdev_hu;
++	struct gpio_desc *lab_rts;
  	struct gpio_desc *bt_en;
  	struct gpio_desc *sw_ctrl;
-@@ -1206,10 +1208,10 @@
+ 	struct clk	 *susclk;
+@@ -1206,10 +1209,10 @@
  	return 0;
  }
 
@@ -30,7 +32,7 @@
 
  static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
  {
-@@ -1230,7 +1232,7 @@
+@@ -1230,7 +1233,7 @@
  {
  	struct hci_uart *hu = hci_get_drvdata(hdev);
  	struct qca_data *qca = hu->priv;
@@ -39,7 +41,7 @@
 
  	if (lab_phase > 0 && lab_phase < 6) {
  		atomic_inc(&qca->lab_events[lab_phase]);
-@@ -1240,7 +1242,7 @@
+@@ -1240,7 +1243,7 @@
  	}
 
  	/* Opt-in: baud response only; no addresses or unrelated payloads. */
@@ -48,7 +50,7 @@
  	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
  	    get_unaligned_le16(skb->data + 3) == 0xfc48)
  		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
-@@ -1311,7 +1313,7 @@
+@@ -1311,7 +1314,7 @@
  static int qca_recv(struct hci_uart *hu, const void *data, int count)
  {
  	struct qca_data *qca = hu->priv;
@@ -57,7 +59,7 @@
  	bool lab_active = lab_phase > 0 && lab_phase < 6;
 
  	if (lab_active && count > 0) {
-@@ -1415,10 +1417,10 @@
+@@ -1415,10 +1418,10 @@
  	while (!skb_queue_empty(&qca->txq))
  		usleep_range(100, 200);
 
@@ -70,7 +72,7 @@
  		bt_dev_warn(hdev, "LAB baud delay20ms before TX drain ns=%llu", ktime_get_ns());
  		msleep(20);
  	}
-@@ -1427,7 +1429,7 @@
+@@ -1427,7 +1430,7 @@
  		serdev_device_wait_until_sent(hu->serdev,
  		      msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
 
@@ -79,7 +81,7 @@
  		bt_dev_warn(hdev, "LAB TX drain-return ns=%llu", ktime_get_ns());
 
  	/* Give the controller time to process the request */
-@@ -1443,7 +1445,7 @@
+@@ -1443,7 +1446,7 @@
  		break;
 
  	case QCA_QCA6390:
@@ -88,7 +90,7 @@
  			/* Delay already applied before drain, matching HAL ordering. */
  			bt_dev_warn(hdev, "LAB no second baud delay; host switch next");
  		} else {
-@@ -1934,6 +1936,30 @@
+@@ -1934,6 +1937,30 @@
  	return 0;
  }
 
@@ -119,7 +121,7 @@
  static int qca_setup(struct hci_uart *hu)
  {
  	struct hci_dev *hdev = hu->hdev;
-@@ -1947,13 +1973,13 @@
+@@ -1947,13 +1974,13 @@
  	struct qca_serdev *qcadev;
  	const char *soc_name;
 
@@ -135,7 +137,7 @@
  		return -ECANCELED;
 
  	ret = qca_check_speeds(hu);
-@@ -2007,7 +2033,10 @@
+@@ -2007,7 +2034,10 @@
 
  	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
 
@@ -147,7 +149,7 @@
  		ret = qca_set_speed(hu, QCA_INIT_SPEED);
  		if (ret)
  			goto out;
-@@ -2024,8 +2053,13 @@
+@@ -2024,8 +2054,13 @@
  		}
  		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
  		atomic_set(&qca->lab_phase, 2);
@@ -161,7 +163,7 @@
  		hci_uart_set_flow_control(hu, false);
  		if (ret)
  			goto out;
-@@ -2132,7 +2166,9 @@
+@@ -2132,7 +2167,9 @@
  	}
 
  out:
@@ -172,7 +174,16 @@
  		atomic_set(&qca->lab_phase, 0);
  		qca_lab_rx_dump(hdev, qca);
  		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
-@@ -2474,6 +2510,36 @@
+@@ -2453,6 +2490,8 @@
+ 	int err;
+ 	bool power_ctrl_enabled = true;
+
++	BUILD_BUG_ON(offsetof(struct qca_serdev, serdev_hu) != 0);
++
+ 	qcadev = devm_kzalloc(&serdev->dev, sizeof(*qcadev), GFP_KERNEL);
+ 	if (!qcadev)
+ 		return -ENOMEM;
+@@ -2474,6 +2513,36 @@
  		qcadev->btsoc_type = data->soc_type;
  	else
  		qcadev->btsoc_type = QCA_ROME;

@@ -19,12 +19,30 @@ Probe validates the r8s machine, QCA6390, GPIO bank gpq0, offset2 and active-hig
 
 Use a finite30s supervisor with thermal/failsafe/boot/frequency guards, bounded unload, original hash/srcversion/flag verification, and LOW readback after cleanup. Return to the original DT via a separate bounded RAM boot only after successful restoration and health checks. Stop active work on access loss or restoration/health failure. No partition write, shared-chip reset, Wi-Fi configuration change or24h qualification is involved.
 
-## Observed, 2026-10-02
+## Layout correction — supersedes the initial trial
+
+The initial public patch in commit e5c7d00 is invalid and must not be used.
+It inserted `lab_rts` before `qca_serdev.serdev_hu`. Serdev RX/write-wakeup
+callbacks cast `serdev_device_get_drvdata()` directly to `struct hci_uart *`,
+so the embedded hci_uart must remain the first member. The invalid module
+triggered WARN_ON in those callbacks, before the RX instrumentation, and
+rejected delivery. UART RX21/QCA RX0 is explained by that instrumentation
+error; it is not evidence of a physical RTS fault or a UART→TTY loss.
+
+The current patch keeps hci_uart first, places lab_rts after it, and adds
+`BUILD_BUG_ON(offsetof(struct qca_serdev, serdev_hu) != 0)` at probe. W=1 and
+exact public source checks validate this invariant. Treat the observations
+below as an invalid historical trial. The GPIO pulse still has no valid
+hardware result until a corrected module passes the initial version guard.
+Future supervisors must check full new kernel logs for WARNING/BUG/Oops/panic,
+not just protocol counters, and stop active testing on a new warning.
+
+## Initial invalid trial, 2026-10-02
 
 The RAM candidate booted normally. GPIO configuration matched the control and the lab acquired the descriptor LOW. However, the initial version query at115200 timed out after about2.036s. All active QCA RX phase counters remained zero. The guard aborted setup: **RTS HIGH and the baud transition were not executed**. This result neither validates nor rejects the pulse hypothesis.
 
-UART counters increased TX5/RX21 across the30s window, despite the zero active QCA counters. Those21bytes are not a validated version response and their arrival time was not captured by this experiment. They could fall outside the counted phase or before the protocol callback. GPIO DAT readback is not an electrical pad measurement.
+UART counters increased TX5/RX21 across the30s window, despite the zero active QCA counters. Those21bytes are not a validated version response in this trace. The callback WARN_ON caused by the invalid structure layout accounts for rejected delivery before the instrumentation. GPIO DAT readback is not an electrical pad measurement.
 
-Both module removals completed; original modules, hashes, flags and limits were restored with RTS LOW and normal health. A single bounded RAM return restored the original DT and GPIO hog. The follow-up `../qca-rxgate/` branch investigates the UART/serdev/QCA observation gap on the original DT, without another baud command or GPIO pulse.
+Both module removals completed; original modules, hashes, flags and limits were restored with RTS LOW and normal health. A single bounded RAM return restored the original DT and GPIO hog. The follow-up `../qca-rxgate/` control kept the correct structure layout and delivered a valid version, without another baud command or GPIO pulse. It does not validate the invalid GPIO module.
 
-The public patch sequence was checked against the exact compiled sources. The DTS include compiles against the board tree; the RAM image's semantic changes were independently restricted to the five relevant DT nodes, with kernel/ramdisk/header preserved except DT size. Claude CLI returned no usable review in two bounded text-only calls; validation here was local. Raw logs, images and device identifiers remain private.
+The public patch sequence was checked against the exact compiled sources. The DTS include compiles against the board tree; the RAM image's semantic changes were independently restricted to the five relevant DT nodes, with kernel/ramdisk/header preserved except DT size. Raw logs, images and device identifiers remain private.

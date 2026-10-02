@@ -271,3 +271,15 @@ version success before a pulse. See
 [`qca-rts-gpio`](../experiments/qca-rts-gpio/README.md) and
 [`qca-rxgate`](../experiments/qca-rxgate/README.md). The pulse is **not tested**,
 Bluetooth remains unenabled, and24h qualification remains deferred.
+
+### Correction: the initial GPIO trial used an invalid structure layout
+
+The RTS module in e5c7d00 placed its new GPIO field before the embedded
+`hci_uart`, breaking the serdev callbacks' drvdata cast. Full logs show RX and
+write-wakeup WARN_ON before the instrumentation. Therefore the apparent
+UART/serdev delivery gap was a lab bug, not an established UART/TTY or physical
+RTS failure. The control RX-gate module did not have that layout change and
+its successful query remains valid. The current RTS patch preserves hci_uart
+at offset zero and enforces it at compile time. The pulse remains untested;
+a corrected low-only query is required before any pulse. Original control
+kernel, DT and modules were restored; no production GPIO change was installed.
