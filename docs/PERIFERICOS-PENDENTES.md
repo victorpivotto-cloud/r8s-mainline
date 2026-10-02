@@ -187,6 +187,53 @@ Execução no host, sem telefone:
 PYTHONDONTWRITEBYTECODE=1 python3 tests/test-zt7650-event-decoder.py -v
 ```
 
+### Contrato de transporte e inicialização antes do porte
+
+Na referência vendor acima, `read_data` e `write_cmd` verificam somente
+retornos negativos de `i2c_master_send`, embora o ponteiro/comando tenha dois
+bytes. `read_data` também aceita recepção curta e retorna o tamanho solicitado.
+Assim, retorno não negativo não comprova que todo o pacote foi preenchido.
+O futuro driver deve construir LE16 explicitamente, exigir envio de2 bytes e
+recepção do tamanho completo, converter transferências curtas em erro e
+impedir publicação de dados incompletos. Zerar o buffer não substitui essa
+checagem. Preservar as esperas requeridas pelo protocolo ao adaptar o transporte.
+
+`tests/test-zt7650-vendor-transfers.py` extrai os dois helpers da fonte vendor
+fornecida pelo usuário e compila um mock C no host. Controles de tamanho exato,
+erro negativo, limite de tentativas e alimentação desligada passaram.
+O mock reproduziu envio curto de0/1 byte aceito pelos dois helpers e recepção
+de0..15 bytes reportada como16, preservando a cauda do buffer anterior.
+É caracterização de código com retornos injetados; não demonstra que essas
+transferências curtas ocorreram no aparelho, nem implementa uma correção.
+TUI/secure touch, escalonamento, temporização e concorrência reais não são
+modelados; os erros negativos são exercitados no estado PROBE.
+
+Para reproduzir, obtenha `zinitix_ts.c` da revisão vendor vinculada acima
+e execute no host com Python3 e um compilador C:
+
+```sh
+python3 tests/test-zt7650-vendor-transfers.py --source /caminho/zinitix_ts.c
+```
+
+Outros cuidados conferidos na fonte:
+
+- `ts_read_coord` chama o ACK final sem verificar seu retorno e retorna sucesso.
+  O porte precisa de uma política limitada de recuperação da IRQ quando a
+  leitura ou o ACK falhar, além de liberar slots sem ficar preso em contato.
+- A alimentação envolve AVDD, DVDD ou GPIO e pinctrl. O vendor registra
+  falhas de pinctrl, mas retorna sucesso nessa função; usar recursos por
+  dispositivo, propagar erros e desfazer habilitação parcial no novo driver.
+- `zt_power_sequence` distingue checksum já válido de uma sequência vendor
+  com comandos de inicialização/início NVM. Isso não comprova uma atualização
+  de firmware, mas os efeitos precisam ser entendidos antes de copiar a rotina.
+- `mini_init_touch` escreve reset, modo, opções, ACKs repetidos e configurações
+  de baixa energia/grip; seu nome não garante uma inicialização mínima.
+  Selecionar e justificar o contrato necessário antes de qualquer teste I2C.
+
+Nenhuma dessas rotinas foi executada no telefone nesta análise. Firmware,
+calibração, power sequencing mínimo e tratamento físico de IRQ continuam
+pendentes; o decoder no host não resolve essas dependências.
+
 ## Som interno
 
 A árvore Samsung contém ABOX v3 para Exynos9830. O [probe](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/sound/soc/samsung/abox/abox.c)
