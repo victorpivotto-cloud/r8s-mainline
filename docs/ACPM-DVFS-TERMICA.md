@@ -214,12 +214,12 @@ internos; a comparação é de layout dos fontes, não uma leitura do firmware.
 No vendor, os valores de tipo são QUEUE1 e BUFFER2. Uma futura instrumentação
 pode ler esse word por `readl`, junto com id/qlen/mlen/poll, evitando printk
 no caminho de ACK. Valor0 seria inconclusivo. Ainda é preciso confirmar base
-e versão da tabela; nenhum diagnóstico novo foi instalado no aparelho.
+e versão da tabela; naquela etapa ainda não havia diagnóstico instalado.
 Claude revisou essa inferência com os resultados sanitizados. A equivalência
 de offsets não confirma echoRX nem resolve ACK tardio.
 
 
-### Diagnóstico de inicialização preparado
+### Diagnóstico de inicialização e boot em RAM
 
 `patches/0012-acpm-descriptor-diagnostic.patch` acrescenta `word_0c` ao
 log existente de geometria dos canais. Lê o campo reservado com `readl`
@@ -231,10 +231,35 @@ Baseline SHA256 do provider antes desse diagnóstico:
 O patch aplica sobre esse baseline e reproduz exatamente o fonte compilado.
 Compilação do objeto ACPM para arm64 passou. Revisão por Claude e checkpatch
 sem exigência de assinatura passaram; isso não é submissão upstream.
-**Ainda não instalado nem validado em boot no aparelho.**
+O kernel com esse diagnóstico passou em boot remoto **somente em RAM**,
+com DT/ramdisk preservados e módulos da mesma release; a imagem instalada
+de retorno permanece intacta.
 
 O log representa uma amostra de inicialização. Valores1/2 são compatíveis
 com os rótulos QUEUE/BUFFER da referência, sem certificar ABI; zero é
 inconclusivo. Comparar sempre id/poll/mlen/qlen do mesmo canal. O diagnóstico
 não verifica echoRX, não recupera timeout e não identifica a causa do reset.
 Remover esse campo ao encerrar a investigação se não for mais útil.
+
+
+### Resultado observado no firmware ativo
+
+A leitura na inicialização produziu a seguinte combinação, sem publicar
+endereços SRAM ou logs operacionais:
+
+| Canais | word_0c | poll | mlen | qlen |
+|---|---:|---:|---:|---:|
+| 0 | 1 | 1 | 16 | 15 |
+| 1,4,10 | 1 | 1 | 16 | 3 |
+| 2 | 1 | 1 | 16 | 5 |
+| 9 | 1 | 1 | 16 | 7 |
+| 3,5,6 | 2 | 0 | 16 | 1 |
+| 7,8 | 2 | 1 | 2 | 1 |
+
+No canal DVFS5, valor2 é compatível com TYPE_BUFFER da referência vendor,
+comprovando a presença desse valor no descriptor observado. Isso ainda não
+comprova que o RX contenha sequência ou o significado exato de seu ACK.
+Sensores/failsafe/bateria e limites voltaram normalmente após o boot, sem
+novos erros DVFS. Próximo passo é observar TX/RX numa transação normal com
+instrumentação limitada; não injetar timeout nem adotar recuperação sem
+correlação comprovada. A causa do reset continua aberta.

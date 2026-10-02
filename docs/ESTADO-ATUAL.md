@@ -1,4 +1,4 @@
-# Estado do porte r8s — 01/10/2026
+# Estado do porte r8s — 02/10/2026
 
 Debian 13 sobre kernel 6.12 do porte Exynos990, com boot autônomo, UFS,
 microSD, Wi-Fi QCA6390 e rede USB gadget. A árvore ainda é experimental.
@@ -9,6 +9,8 @@ Este documento substitui o resumo histórico de setembro.
 - ACPM/DVFS: transações CPU serializadas e ownership do slot até a resposta.
   Mock concorrente reproduz a falha anterior. Respostas tardias após timeout
   continuam sem solução comprovada; não extrapolar o mock para firmware.
+  Diagnóstico em RAM observou canal DVFS5 com word_0c=2, poll0 e slot único,
+  compatível com TYPE_BUFFER vendor; echoRX ainda não foi confirmado.
 - Térmica: seis sensores, cooling passivo CPU e failsafe por sensor/heartbeat.
   Injeção de falha, ausência de polling e unload/reload foram testados.
   Calibração e desligamento crítico não foram comprovados.

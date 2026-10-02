@@ -58,6 +58,6 @@ are unchanged. See `docs/BATERIA-HEALTH.md`.
 
 `0012-acpm-descriptor-diagnostic.patch` is diagnostic only: one raw shared
 memory word in the existing channel initialization log, with an offset
-assertion. arm64 object build and patch reproduction passed; hardware boot
-validation is pending. It does not fix late ACK or alter DVFS. Baseline and
+assertion. arm64 build, patch reproduction and RAM boot passed; the active
+DVFS descriptor reports word_0c=2 with poll0/qlen1. It does not fix late ACK or alter DVFS. Baseline and
 interpretation are in `docs/ACPM-DVFS-TERMICA.md`.
