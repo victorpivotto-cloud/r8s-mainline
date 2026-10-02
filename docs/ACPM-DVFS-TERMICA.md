@@ -191,3 +191,29 @@ se pode atribuir ao caminho sem polling a correlação observada no caminho
 polling. Para definir recuperação, ainda falta conferir a versão/layout da
 tabela SRAM e o significado do RX/ACK do canal5. Evitar transplantar o envio
 vendor, que pressupõe fila circular, para um slot único sem esse mapeamento.
+
+
+### Layout dos descritores: comparação compilada
+
+Uma sonda local compilou as definições reais `acpm_chan_shmem` do porte e
+`ipc_channel`/`channel_info` do
+[framework vendor](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/acpm/fw_header/framework.h).
+Ambos têm72 bytes, com estes offsets em bytes:
+
+| Campo do porte | Campo vendor | Offset comum |
+|---|---|---:|
+| id | id | 0 |
+| reserved[2] | type | 12 |
+| rx_rear/front/base | ch.rx_rear/front/base | 16/20/24 |
+| tx_rear/front/base | ch.tx_rear/front/base | 40/44/48 |
+| qlen/mlen | ch.q_len/q_elem_size | 52/56 |
+| poll_completion | ap_poll | 68 |
+
+Essas três definições usam campos de32 bits, sem ponteiros ou condicionais
+internos; a comparação é de layout dos fontes, não uma leitura do firmware.
+No vendor, os valores de tipo são QUEUE1 e BUFFER2. Uma futura instrumentação
+pode ler esse word por `readl`, junto com id/qlen/mlen/poll, evitando printk
+no caminho de ACK. Valor0 seria inconclusivo. Ainda é preciso confirmar base
+e versão da tabela; nenhum diagnóstico novo foi instalado no aparelho.
+Claude revisou essa inferência com os resultados sanitizados. A equivalência
+de offsets não confirma echoRX nem resolve ACK tardio.

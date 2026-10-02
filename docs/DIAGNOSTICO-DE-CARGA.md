@@ -63,3 +63,11 @@ memória224,6M. A janela encerrou por timeout esperado, preservou o boot,
 restaurou os três limites e terminou sem unidades falhas ou novos erros
 DVFS. Esses resultados justificam progresso incremental sob as mesmas
 guardas; a compilação completa e a causa do reset continuam pendentes.
+
+
+Uma terceira janela de180s concluiu dois objetos C gerados do NIR
+(`nir_opt_algebraic.c` e `nir_opcodes.c`), além do gerador git_sha1.
+Pico de memória404,3M, CPU174,914s; limites restaurados e mesmo boot,
+sem novos erros DVFS ou reset. O número de tarefas por janela depende do
+custo dos objetos: medir o próximo comando antes de repetir uma janela que
+não conclua objeto. A compilação inteira continua pendente.
