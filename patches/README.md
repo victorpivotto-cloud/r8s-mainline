@@ -50,3 +50,7 @@ are experimental; provider/cpufreq origins remain the Exynos990 community port.
 `0010-thermal-mode-hwmon.patch` is a follow-up to the runtime module.
 Build, callback mock and hardware mode/unload/recovery tests passed on #25.
 Runtime sources include it; sustained qualification remains pending. See `docs/ACPM-DVFS-TERMICA.md`.
+
+`0011-max17042-health-overflow.patch` widens the absent-voltage-limit arithmetic
+to s64. Source-function mock and hardware RAM boot passed; charging settings
+are unchanged. See `docs/BATERIA-HEALTH.md`.

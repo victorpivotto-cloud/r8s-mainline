@@ -20,6 +20,8 @@ Este documento substitui o resumo histórico de setembro.
 - GPU: EGL clear e shader GLSL/triângulo passaram em Mali-G77 com Mesa
   isolado e patch atribuído ao porte z3s. Não substituir Mesa do sistema;
   compositor e renderização sustentada continuam sem qualificação.
+- Bateria: corrigido overflow do limite ausente no max17042; teste da função
+  real e boot em RAM confirmaram a correção de `health`. Perfil de carga intacto.
 - Toque: desamarrar o driver incompatível encerra a tempestade de IRQ;
   isso não habilita entrada por toque.
 
@@ -30,8 +32,11 @@ instalada de retorno. Não instalar permanentemente com base só nesses testes.
 
 Houve reset inesperado durante compilação nativa de Mesa com ninja -j2, sem
 shutdown limpo ou pstore. A causa permanece aberta. A compilação foi concluída
-em outro host. O ensaio de 24 horas em repouso ainda está em andamento;
+em outro host. O ensaio de 24 horas foi interrompido e ficou adiado;
 não existe aprovação de carga sustentada nem de recuperação de energia.
+Carga curta de memória/hash numa CPU LITTLE completou 30 s; MID e BIG foram
+interrompidos pelo limite conservador de 70 °C. Nenhum desses testes causou
+reset, mas não reproduzem nem esclarecem o reset da compilação Mesa.
 
 Bluetooth tem nó UART/USI, mas o comando QCA ainda dá timeout. USB host detecta
 dispositivo e falha em enumeração (-71); áudio/webcam USB dependem dele.
@@ -45,6 +50,8 @@ de watchdog de hardware qualificado permanecem limitações.
 - [Reboot lk3rd](REBOOT-LK3RD.md).
 - [GPU Mali-G77](GPU-MALI-G77.md).
 - [Qualificação finita](QUALIFICACAO.md).
+- [Investigação dos periféricos](PERIFERICOS-PENDENTES.md).
+- [Diagnóstico de bateria](BATERIA-HEALTH.md).
 - [Configuração de rede e módulos](LACUNAS-DE-KERNEL.md).
 
 Cada usuário deve conservar sua imagem/módulos de retorno e suas configurações

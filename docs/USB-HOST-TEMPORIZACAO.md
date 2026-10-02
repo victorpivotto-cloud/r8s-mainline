@@ -44,7 +44,10 @@ uma coleta de qualificação. Manter o regdump operacional local.
 No mainline usado aqui, propriedades `snps,ref-clock-period-ns = <50>` e
 `snps,gfladj-refclk-lpm-sel-quirk` no nó DWC3 calculam DECR=12 e FLADJ=0
 quando não há ref_clk direto. Foi preparado um candidato de DT para esse
-ensaio, sem alterar o kernel. **Não foi iniciado nem validado no hardware.**
+ensaio, sem alterar o kernel. **O candidato peripheral foi iniciado em RAM**: REFCLKPER=50, DECR=12,
+FLADJ=0 foram lidos no debugfs; gadget/RNDIS continuou acessível. O retorno
+à imagem de controle também passou. Isso verifica aplicação das propriedades
+e funcionamento básico do gadget, sem aprovar host ou confirmar o clock físico.
 A propriedade não comprova o clock físico e não ajusta automaticamente DTOUT.
 
 Próximo ensaio: confirmar clock/revisão, medir registradores em host, comparar

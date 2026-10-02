@@ -1,0 +1,13 @@
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index 496c3e1f2..d16ad4a2d 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -199,7 +199,7 @@ static int max17042_get_battery_health(struct max17042_chip *chip, int *health)
+ 		goto out;
+ 	}
+ 
+-	if (vbatt > chip->pdata->vmax + MAX17042_VMAX_TOLERANCE) {
++	if (vbatt > (s64)chip->pdata->vmax + MAX17042_VMAX_TOLERANCE) {
+ 		*health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+ 		goto out;
+ 	}
