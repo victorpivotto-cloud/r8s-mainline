@@ -79,3 +79,7 @@ sem hipótese nova. O [patch diagnóstico](../experiments/qca-version-first/READ
 registra o alcance do teste. Próximo: revisar a UART Samsung, baud efetivamente
 programado, CTS e o tratamento do ACK de baud, antes de qualquer download
 completo de firmware. HCI funcional e conexão continuam pendentes.
+
+Continuação: [UART Samsung e ACK/fallback](QCA6390-UART-SAMSUNG.md). A HAL
+examinada seleciona3,2M paraHastings; o driverSamsung do porte limita a3M.
+O ensaio com retorno apenas dohosta115200 voltou a receber versão.

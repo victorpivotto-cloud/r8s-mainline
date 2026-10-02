@@ -369,3 +369,10 @@ byte00, não o terceiro03; significado do byte adicional continua pendente.
 Consulta de versão115200 antes da mudança3M, com flow control temporário,
 respondeu em115200 mas expirou a3M. Sem patch/NVM/retries, originais restaurados.
 Não é correção; próximo revisar UART Samsung/clock/CTS e ACK de baud.
+
+### ACK de baud e UART Samsung
+
+[UART Samsung](QCA6390-UART-SAMSUNG.md): consulta3M expirou, retorno apenas
+do hosta115200 recebeu versão, semCommandCompletefc48capturado. Originais
+restaurados, semfirmware. HALHastings usa3,2M; driverSamsung limita3M. Não
+alterar sóDT: preparar suporte/instrumentaçãohostantesensaio3,2M, ainda nãofeito.
