@@ -26,6 +26,53 @@ Próximo diagnóstico: conferir CTS e contadores UART, ordem do wake/reset e
 caminho LPM antes do primeiro comando; comparação fria e sinais físicos ainda
 necessários para atribuir causa.
 
+### UART e caminho de alimentação — leitura passiva em02/10
+
+O DT efetivo reportou `qcom,qca6390-bt`, ligado a `hci_uart_qca`, e um provedor
+`qcom,qca6390-pmu`. A leitura de GPIO mostrou `bt-enable` como saída alta e
+`bt-uart-rts` como saída baixa. Isso registra estado/dono, sem comprovar saída
+de reset ou boot do subsistema Bluetooth. Nenhum GPIO, rail, bind ou comando
+HCI foi alterado nesta rodada.
+
+Em uma amostra de `/proc/tty/driver/s3c2410_serial`, o UART em0x10840000
+reportou TX40/RX0 e CTS ativo. Não foi medido delta dos contadores nem sinal
+no fio. Na fonte Samsung, `s3c24xx_serial_get_mctrl` lê CTS de UMSTAT, mas
+retorna CAR/DSR fixos. O bit CTS ativo descreve a entrada interna naquele
+instante; sua origem elétrica depende de pinmux. RTS reportado pelo serial
+core é estado lógico, distinto da propriedade elétrica do pino.
+
+O debug de pinmux atribuiu gpq0-0, gpq0-1 e gpq0-3 ao UART, com função
+`uart1-bus-norts-pins`; gpq0-2 ficou fora desse mux. Isso é consistente com
+RTS tratado separadamente por GPIO. A listagem de pinmux, sozinha, não mede
+polaridade, nível no fio, integridade do sinal ou sincronização temporal.
+
+Na árvore usada, o probe QCA6390 com DT obtém o alvo `bluetooth` de pwrseq.
+O provedor Qualcomm requisita `bt-enable`, e sua função de habilitação aciona
+esse GPIO após respeitar o intervalo entre habilitações. Os dados QCA6390
+definem `pwup_delay_ms=60` e `gpio_enable_delay_ms=100`; esses valores de fonte
+não comprovam a temporização física do r8s nem corrigem a ausência de RX.
+
+Os pulsos seriais de alimentação a2400/115200 no `qca_regulator_init` são
+selecionados para WCN3988/3990/3991/3998, não para QCA6390. Não importar essa
+sequência de outra família como teste no r8s. `qca_port_reopen` reabre serdev
+e chama `hci_uart_set_flow_control(hu, false)`: nessa API, false habilita flow
+control e RTS lógico; true os desabilita. Interpretar o bool ao contrário
+poderia produzir um diagnóstico inválido.
+
+O callback vendor de BT_WAKE pertence a `uart_ops.wake_peer`; o startup
+registra a função e o controle LPM cancela/rearma um timer de1s. Não foi
+encontrado hook equivalente no UART Samsung mainline desta árvore, nem
+recursos BT_WAKE/HOST_WAKE no `hci_qca`. A função `qca_wakeup` consulta política
+de wake do dispositivo; não aciona BT_WAKE fora de banda.
+
+Claude revisou o resumo público, sem ferramentas/MCP. Suas ressalvas sobre
+CTS transitório, pinmux e diferença entre estado lógico e elétrico foram
+incorporadas. TX40/RX0 e o A/B estático anterior não descartam ordem de
+wake/reset/clock, polaridade ou baud. Próximo trabalho: cruzar esse mux com
+os valores do DT efetivo e o momento do primeiro pedido de versão em fonte,
+antes de propor uma alteração de sequência. Preservar a
+alimentação compartilhada e o Wi-Fi funcional.
+
 ## Toque Zinitix ZT7650
 
 Comparação com [driver Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/input/touchscreen/zinitix/zt7650/zinitix_ts.c)
