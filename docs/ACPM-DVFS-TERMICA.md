@@ -146,3 +146,30 @@ que o firmware talvez não escreva pode impedir todo DVFS. Desabilitar o canal
 após erro também pode impedir a redução térmica de frequência. Revisão de
 Claude sobre texto público confirmou esses limites; a investigação segue
 aberta, sem patch de recuperação instalado.
+
+
+### Comparação com o driver vendor
+
+Referência fixada: ExtremeXT/android_kernel_samsung_exynos990,
+commit `69515fbb7a4395898c05a8624f76a12afbac11c5`:
+[DVFS](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/acpm_dvfs.c)
+e [IPC](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/acpm/acpm_ipc.c).
+
+`exynos_acpm_set_rate` configura `response=true`. No caminho **polling**,
+`check_response` percorre a fila RX e compara a sequência de seis bits antes
+de consumir a entrada. O caminho de timeout faz uma última checagem e,
+persistindo a falha, chama reset de emergência. Essa política vendor não foi
+portada nem testada neste projeto.
+
+O log de inicialização do firmware ativo informa canal5, `poll=0`,
+`mlen=16`, `qlen=1`. Portanto o caminho vendor de polling/fila acima não é
+prova de que o slot DVFS ativo devolva sequência: o modo é diferente.
+No porte, `acpm_set_xfer(response=false)` apenas zera `rxcnt` e `rxd`;
+o helper de slot único ainda espera o bit de interrupção. Os dois flags
+não representam necessariamente a mesma política de espera.
+
+Antes de adaptar uma correção, mapear TYPE_BUFFER/non-polling no vendor e
+confirmar formato e sequência RX durante transações normais, sem provocar
+timeout. Quarentenar um número de sequência, sozinho, não correlaciona o
+bit de ACK e não demonstra solução. Claude revisou a comparação textual;
+flag local e geometria foram conferidos independentemente em fonte/log.
