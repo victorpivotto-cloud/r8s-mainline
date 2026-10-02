@@ -1,0 +1,247 @@
+--- a/drivers/cpufreq/exynos990-cpufreq.c
++++ b/drivers/cpufreq/exynos990-cpufreq.c
+@@ -8,15 +8,20 @@
+  * cached target. Built as a module for iteration.
+  */
+ #include <linux/cpu.h>
++#include <linux/cpu_cooling.h>
+ #include <linux/cpufreq.h>
+ #include <linux/err.h>
++#include <linux/exynos990-cpufreq.h>
+ #include <linux/firmware/samsung/exynos-acpm-protocol.h>
+ #include <linux/init.h>
++#include <linux/jiffies.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/units.h>
++#include <linux/workqueue.h>
+ 
+ #define ACPM_DVFS_CHANNEL	5
+ 
+@@ -27,6 +32,12 @@
+ 	const unsigned int *khz;	/* ascending frequency table (kHz) */
+ 	unsigned int n;
+ 	unsigned int cur_khz;
++	struct thermal_cooling_device *cooling;
++	struct freq_qos_request sensor_max;
++	bool sensor_max_added;
++	bool sensor_healthy;
++	bool failsafe_active;
++	unsigned long last_report;
+ };
+ 
+ static const unsigned int cl0_khz[] = {
+@@ -42,13 +53,22 @@
+ };
+ 
+ static struct z3s_cluster clusters[] = {
+-	{ 2, 0, 3, cl0_khz, ARRAY_SIZE(cl0_khz), 0 },
+-	{ 3, 4, 5, cl1_khz, ARRAY_SIZE(cl1_khz), 0 },
+-	{ 4, 6, 7, cl2_khz, ARRAY_SIZE(cl2_khz), 0 },
++	{ .acpm_id = 2, .first_cpu = 0, .last_cpu = 3,
++	  .khz = cl0_khz, .n = ARRAY_SIZE(cl0_khz) },
++	{ .acpm_id = 3, .first_cpu = 4, .last_cpu = 5,
++	  .khz = cl1_khz, .n = ARRAY_SIZE(cl1_khz) },
++	{ .acpm_id = 4, .first_cpu = 6, .last_cpu = 7,
++	  .khz = cl2_khz, .n = ARRAY_SIZE(cl2_khz) },
+ };
+ 
+ static struct acpm_handle *z3s_acpm;
+ static struct platform_device *z3s_pdev;
++
++/* All three policies share the firmware's single-slot DVFS channel. */
++static DEFINE_MUTEX(z3s_dvfs_lock);
++static DEFINE_MUTEX(z3s_sensor_lock);
++static void z3s_sensor_watchdog(struct work_struct *work);
++static DECLARE_DELAYED_WORK(z3s_sensor_work, z3s_sensor_watchdog);
+ 
+ static struct z3s_cluster *cluster_for_cpu(unsigned int cpu)
+ {
+@@ -60,17 +80,89 @@
+ 	return NULL;
+ }
+ 
++/* Caller owns sensor_lock. QoS is independent of the governor's request. */
++static int z3s_sensor_apply(struct z3s_cluster *cl)
++{
++	bool active = !cl->sensor_healthy || !cl->cooling ||
++		time_after(jiffies, cl->last_report + 5 * HZ);
++	int ret;
++
++	if (!cl->sensor_max_added)
++		return -ENODEV;
++	ret = freq_qos_update_request(&cl->sensor_max,
++			active ? cl->khz[0] : FREQ_QOS_MAX_DEFAULT_VALUE);
++	if (ret < 0)
++		return ret;
++	if (active != cl->failsafe_active)
++		pr_warn("exynos990-cpufreq: cpu%u sensor failsafe %s\n",
++			cl->first_cpu, active ? "engaged" : "released");
++	cl->failsafe_active = active;
++	return 0;
++}
++
++int exynos990_cpufreq_sensor_report(unsigned int cpu, bool healthy)
++{
++	struct z3s_cluster *cl = cluster_for_cpu(cpu);
++	int ret;
++
++	if (!cl)
++		return -EINVAL;
++	mutex_lock(&z3s_sensor_lock);
++	cl->sensor_healthy = healthy;
++	cl->last_report = jiffies;
++	ret = z3s_sensor_apply(cl);
++	mutex_unlock(&z3s_sensor_lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(exynos990_cpufreq_sensor_report);
++
++static void z3s_sensor_watchdog(struct work_struct *work)
++{
++	unsigned int i;
++
++	mutex_lock(&z3s_sensor_lock);
++	for (i = 0; i < ARRAY_SIZE(clusters); i++)
++		if (clusters[i].sensor_max_added)
++			z3s_sensor_apply(&clusters[i]);
++	mutex_unlock(&z3s_sensor_lock);
++	schedule_delayed_work(&z3s_sensor_work, HZ);
++}
++
++static int z3s_failsafe_mask_get(char *buf, const struct kernel_param *kp)
++{
++	unsigned int i, mask = 0;
++
++	mutex_lock(&z3s_sensor_lock);
++	for (i = 0; i < ARRAY_SIZE(clusters); i++)
++		if (clusters[i].failsafe_active)
++			mask |= BIT(i);
++	mutex_unlock(&z3s_sensor_lock);
++	return sysfs_emit(buf, "%u\n", mask);
++}
++
++static const struct kernel_param_ops z3s_failsafe_mask_ops = {
++	.get = z3s_failsafe_mask_get,
++};
++module_param_cb(failsafe_mask, &z3s_failsafe_mask_ops, NULL, 0444);
++MODULE_PARM_DESC(failsafe_mask, "Active sensor clamps: bit0 LITTLE, bit1 MID, bit2 BIG");
++
+ static int z3s_target_index(struct cpufreq_policy *policy, unsigned int index)
+ {
+ 	struct z3s_cluster *cl = policy->driver_data;
+ 	unsigned int khz = policy->freq_table[index].frequency;
+ 	int ret;
+ 
++	/* Keep the slot owned until set_rate has consumed its acknowledgement. */
++	mutex_lock(&z3s_dvfs_lock);
+ 	ret = z3s_acpm->ops->dvfs.set_rate(z3s_acpm, ACPM_DVFS_CHANNEL,
+ 					   cl->acpm_id,
+ 					   (unsigned long)khz * HZ_PER_KHZ);
+ 	if (!ret)
+ 		cl->cur_khz = khz;
++	mutex_unlock(&z3s_dvfs_lock);
++	if (ret)
++		pr_warn_ratelimited("exynos990-cpufreq: cluster %u request %u kHz failed: %d\n",
++				    cl->acpm_id, khz, ret);
+ 	return ret;
+ }
+ 
+@@ -115,8 +207,57 @@
+ 	return 0;
+ }
+ 
++/* ready runs after the core has initialized the policy's QoS constraints. */
++static void z3s_cpufreq_ready(struct cpufreq_policy *policy)
++{
++	struct z3s_cluster *cl = policy->driver_data;
++	struct thermal_cooling_device *cooling;
++	int ret;
++
++	mutex_lock(&z3s_sensor_lock);
++	if (cl->sensor_max_added) {
++		mutex_unlock(&z3s_sensor_lock);
++		return;
++	}
++	/* Start clamped until the sensor module establishes healthy readings. */
++	ret = freq_qos_add_request(&policy->constraints, &cl->sensor_max,
++				   FREQ_QOS_MAX, cl->khz[0]);
++	if (ret < 0) {
++		pr_err("exynos990-cpufreq: cpu%u sensor QoS failed: %d\n", policy->cpu, ret);
++		mutex_unlock(&z3s_sensor_lock);
++		return;
++	}
++	cl->sensor_max_added = true;
++	cl->failsafe_active = true;
++	mutex_unlock(&z3s_sensor_lock);
++	/* Registration can call back into the sensor: never hold sensor_lock. */
++	cooling = cpufreq_cooling_register(policy);
++	if (IS_ERR(cooling)) {
++		pr_err("exynos990-cpufreq: cpu%u cooling unavailable: %ld\n",
++		       policy->cpu, PTR_ERR(cooling));
++		cooling = NULL;
++	}
++	mutex_lock(&z3s_sensor_lock);
++	cl->cooling = cooling;
++	mutex_unlock(&z3s_sensor_lock);
++}
++
+ static void z3s_cpufreq_exit(struct cpufreq_policy *policy)
+ {
++	struct z3s_cluster *cl = policy->driver_data;
++	struct thermal_cooling_device *cooling;
++
++	mutex_lock(&z3s_sensor_lock);
++	cooling = cl->cooling;
++	cl->cooling = NULL;
++	mutex_unlock(&z3s_sensor_lock);
++	cpufreq_cooling_unregister(cooling);
++	mutex_lock(&z3s_sensor_lock);
++	if (cl->sensor_max_added) {
++		freq_qos_remove_request(&cl->sensor_max);
++		cl->sensor_max_added = false;
++	}
++	mutex_unlock(&z3s_sensor_lock);
+ 	kfree(policy->freq_table);
+ }
+ 
+@@ -128,6 +269,7 @@
+ 	.target_index	= z3s_target_index,
+ 	.get		= z3s_get,
+ 	.init		= z3s_cpufreq_init,
++	.ready		= z3s_cpufreq_ready,
+ 	.exit		= z3s_cpufreq_exit,
+ 	.attr		= cpufreq_generic_attr,
+ };
+@@ -160,6 +302,7 @@
+ 
+ 	pr_info("exynos990-cpufreq: registered (ACPM DVFS ch %d)\n",
+ 		ACPM_DVFS_CHANNEL);
++	schedule_delayed_work(&z3s_sensor_work, HZ);
+ 	return 0;
+ err:
+ 	platform_device_unregister(z3s_pdev);
+@@ -168,6 +311,7 @@
+ 
+ static void __exit z3s_cpufreq_module_exit(void)
+ {
++	cancel_delayed_work_sync(&z3s_sensor_work);
+ 	cpufreq_unregister_driver(&z3s_cpufreq_driver);
+ 	platform_device_unregister(z3s_pdev);
+ }
+--- /dev/null
++++ b/include/linux/exynos990-cpufreq.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_EXYNOS990_CPUFREQ_H
++#define _LINUX_EXYNOS990_CPUFREQ_H
++
++#include <linux/types.h>
++
++/* Process context only. A healthy report is a bounded sensor heartbeat. */
++int exynos990_cpufreq_sensor_report(unsigned int cpu, bool healthy);
++
++#endif

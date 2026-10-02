@@ -1,0 +1,44 @@
+--- a/drivers/firmware/samsung/exynos-acpm.c
++++ b/drivers/firmware/samsung/exynos-acpm.c
+@@ -485,6 +485,8 @@
+ 			      xfer->rxcnt * sizeof(*xfer->rxd));
+ 
+ 	writel(1u << achan->id, acpm->mbox_intr + ACPM_MBOX_INTCR1);
++	/* Flush the ACK clear before the next owner can issue a doorbell. */
++	readl(acpm->mbox_intr + ACPM_MBOX_INTSR1);
+ 	clear_bit_unlock(seqnum - 1, achan->bitmap_seqnum);
+ 	return ret;
+ }
+@@ -557,14 +559,27 @@
+ 		writel(idx, achan->tx.front);
+ 
+ 		ret = mbox_send_message(achan->chan, (void *)&msg);
+-		if (ret < 0)
++		if (ret < 0) {
++			if (achan->qlen == 1) {
++				u32 seqnum = FIELD_GET(ACPM_PROTOCOL_SEQNUM,
++						       xfer->txd[0]);
++
++				clear_bit_unlock(seqnum - 1, achan->bitmap_seqnum);
++			}
+ 			return ret;
++		}
+ 
+ 		mbox_client_txdone(achan->chan, 0);
+-	}
+-
+-	if (achan->qlen == 1)
+-		return acpm_wait_for_singleslot_response(achan, xfer);
++
++		/*
++		 * Single-slot channels have no free queue entry for another
++		 * caller. Keep tx_lock across the response and ACK clear;
++		 * otherwise another cluster can overwrite TX or consume our ACK.
++		 * Multi-slot channels retain their existing concurrent RX path.
++		 */
++		if (achan->qlen == 1)
++			return acpm_wait_for_singleslot_response(achan, xfer);
++	}
+ 
+ 	return acpm_wait_for_message_response(achan, xfer);
+ }

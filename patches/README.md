@@ -1,6 +1,6 @@
 # Patches — what is ours and what is not
 
-**Read this before submitting anything anywhere.** Two of these files are not
+**Read this before submitting anything anywhere.** Some of these files are not
 our work, and we do not want to take credit for them.
 
 | Patch | Origin |
@@ -30,3 +30,19 @@ It is deliberately small and does one thing. Before sending it to
 `0003` and `0006` add `dev_info` calls that were essential while debugging and
 are noise afterwards. `0003`'s grants are functional and must stay; its prints
 are not.
+
+## Runtime patches
+
+- `0007-acpm-single-slot-ownership.patch`: ownership until response consumption,
+  sequence cleanup on send failure and ACK readback; focused changes to the
+  community provider, not a vendored copy of it.
+- `0008-cpufreq-thermal-sensor-failsafe.patch`: shared transaction mutex,
+  cooling registration and independent sensor/heartbeat QoS safety request;
+  includes the new exported API header. Baselines and limits in
+  `docs/ACPM-DVFS-TERMICA.md`.
+- `0009-mesa-g77-model-DA-COMUNIDADE.patch`: **not ours**, Mali-G77 model and
+  tilebuffer entry documented by the z3s port; tested here on the FE using
+  an isolated Mesa prefix. See `docs/GPU-MALI-G77.md`.
+
+The runtime modules/tests accompany these patches. New code and modifications
+are experimental; provider/cpufreq origins remain the Exynos990 community port.

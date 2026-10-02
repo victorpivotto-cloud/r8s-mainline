@@ -1,3 +1,8 @@
+> Atualização: reboot controlado ganhou uma correção experimental via módulo
+> PMU/syscon. Leia [REBOOT-LK3RD.md](REBOOT-LK3RD.md); ela não comprova resets de
+> emergência ou watchdog. Os registros históricos abaixo continuam úteis para
+> alimentação e condições de religamento.
+
 # Energia, religamento e o reinício que não volta
 
 Medições de 14–15/09/2026.

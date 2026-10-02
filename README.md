@@ -1,7 +1,8 @@
 # Mainline Linux on the Samsung Galaxy S20 FE (SM-G780F, `r8s`)
 
 Debian 13 on a mainline 6.12 kernel, booting on its own, with **Wi-Fi, microSD,
-USB gadget networking and CPU DVFS working**.
+USB gadget networking and CPU DVFS working**. Runtime fixes and small GPU/network
+tests are available below; sustained-load qualification remains pending.
 
 > **Docs are in Portuguese.** This README is in English because the findings
 > below are useful to anyone working on Exynos 990. Sorry for the mix.
@@ -32,8 +33,8 @@ S-Boot -> lk3rd (sda13) -> our kernel (sda33) -> Debian 13     ~22 s, no PC
 | Storage | UFS (root), **microSD** (33.58 MHz, auto-mounted) |
 | **Wi-Fi** | **QCA6390 via ath11k**, 2.4 + 5 GHz, ~258 Mbit/s (Wi-Fi 6, 2 streams) |
 | Networking | USB gadget (RNDIS + ACM) as a rescue path |
-| CPU | DVFS on all 3 clusters (A55 / A76 / M5) |
-| GPU | panfrost probes, render node present |
+| CPU | DVFS on all 3 clusters; serialized ACPM transactions, passive cooling and sensor failsafe tested |
+| GPU | Mali-G77 EGL clear and GLSL triangle/readback succeed with isolated patched Mesa; sustained rendering unqualified |
 | Display | `simpledrm` on the bootloader framebuffer |
 | Power | battery gauge + charger; **USB-C OTG VBUS** (max77705 boost) |
 | Clock | `fake-hwclock` + `systemd-timesyncd` (the hardware RTC does not retain) |
@@ -42,13 +43,13 @@ S-Boot -> lk3rd (sda13) -> our kernel (sda33) -> Debian 13     ~22 s, no PC
 
 | | |
 |---|---|
-| Bluetooth | needs a UART node with `qcom,qca6390-bt` (same chip, rail already on) |
+| Bluetooth | UART/USI node present; QCA6390 version command still times out |
 | Touch | Zinitix **ZT7650**; mainline `zinitix` speaks bt4xx/bt5xx only |
-| Audio | ABOX not ported — no sound cards at all |
+| Audio | internal ABOX not ported; USB ALSA module loads, physical USB audio untested |
 | Camera | no mainline support for the Exynos 990 ISP |
 | **USB host** | xHCI comes up, but nothing enumerates (`-71`). See below |
-| Thermal | no TMU node: the only zone is the battery gauge, stuck at 25 °C |
-| Power-on | the phone **does not boot by itself** when power returns — needs the button |
+| Thermal | ACPM sensors, CPU cooling and sensor failsafe available; calibration and critical shutdown unverified |
+| Power-on | wall-charger boot observed from empty battery; recovery from all power/reset conditions unqualified |
 
 ---
 
@@ -153,18 +154,21 @@ printf '\033[?25l\033[H\033[2J' > /dev/tty1
 Full write-up: `docs/TELA-E-CONSOLE.md`. This is probably the most transferable
 finding here — it applies to any phone running mainline with `simpledrm`.
 
-### 5. `systemctl reboot` does not come back
+### 5. Reboot reason preparation (experimental fix available)
 
-There is no `reboot-mode` node in the DT, so Linux never writes the reboot
-reason and the bootloader lands in **Download Mode**, needing physical
-intervention. Use `poweroff`: with a **wall charger** the phone powers itself
-back on in ~10 s, even from an empty battery.
-
-From a **PC USB port** it will not: the driver caps input at 500 mA and the
-running phone draws 530–600 mA, so it boots, runs ~75 s and dies, repeatedly.
-Details in `docs/ENERGIA-E-BOOT.md`.
+Without reboot-reason preparation, Linux reset can land in Download Mode.
+The runtime module now prepares the lk3rd protocol through the PMU syscon.
+Normal reboot and remote fastboot entry/return passed. It must be loaded and
+armed; emergency restart/watchdog/panic paths remain unverified.
+See [remote reboot](docs/REBOOT-LK3RD.md) and [power constraints](docs/ENERGIA-E-BOOT.md).
 
 ## Known problems with this port
+
+- **An unexplained reset occurred during a native Mesa build.** Basic network,
+  cooling/failsafe and a small GPU test pass; sustained-load qualification has
+  not. Test new images in RAM and keep a known working return image.
+- **Charging threshold and critical thermal shutdown are unverified.** CPU
+  cooling/failsafe does not establish battery charge protection or hardware Tshut.
 
 - **The S2MPU grant is broad.** It currently grants RW over all low RAM to the
   HSI1 block, which defeats the protection the S2MPU exists to provide. Fine on a
@@ -181,15 +185,27 @@ Details in `docs/ENERGIA-E-BOOT.md`.
 
 ---
 
+## Runtime fixes and reproducible tests
+
+- [ACPM serialization, sensors, cooling and failsafe](docs/ACPM-DVFS-TERMICA.md).
+- [Remote normal/fastboot reboot through lk3rd](docs/REBOOT-LK3RD.md).
+- [Mali-G77 Mesa model fix and isolated EGL test](docs/GPU-MALI-G77.md).
+- [Kernel config and isolated network verification](docs/LACUNAS-DE-KERNEL.md).
+
+These are experimental r8s results, not a complete multimedia port or proof of
+unattended reliability. Drivers, focused patches and tests are included;
+firmware blobs, device-specific credentials and private service configuration are not.
+
 ## Layout
 
 ```
 patches/   kernel patches, by subject
-drivers/   new files (rails, S2MPU grant helper)
+drivers/   new files; runtime/ has thermal and reboot modules
 dts/       exynos990-r8s-b.dts
 scripts/   on-device helpers (card prep, rotation, Wi-Fi, OTG VBUS,
            screen toggle, software watchdog)
 docs/      detailed write-ups, in Portuguese
+tests/     isolated network, thermal/failsafe and EGL tests
 ```
 
 Docs worth reading even if you are not porting this exact phone:
@@ -198,7 +214,8 @@ Docs worth reading even if you are not porting this exact phone:
 |---|---|
 | `docs/TELA-E-CONSOLE.md` | the `getty`/`simpledrm` freeze and how to blank the screen |
 | `docs/ENERGIA-E-BOOT.md` | reboot lands in Download Mode; self power-on; charging traps |
-| `docs/LACUNAS-DE-KERNEL.md` | kernel config gaps you will hit (`IP_MULTIPLE_TABLES`, `NF_CONNTRACK_NETLINK`, `nft_redir`, no watchdog) |
+| `docs/QUALIFICACAO.md` | finite idle collection, approval criteria and limits |
+| `docs/LACUNAS-DE-KERNEL.md` | kernel config gaps you will hit (`IP_MULTIPLE_TABLES`, `NF_CT_NETLINK`, `nft_redir`, no watchdog) |
 
 Patches apply on the `exynos990-fu` branch of
 [exynos990-mainline/linux](https://github.com/exynos990-mainline/linux)
