@@ -1,14 +1,15 @@
 # Bluetooth, toque, som e câmera: investigação do porte
 
-Resultados de 01/10/2026, restritos à árvore 6.12 usada neste projeto.
+Resultados de01–02/10/2026, restritos à árvore6.12 usada neste projeto.
 O telefone continua sem entrada por toque/Bluetooth, placa de som interna ou
 nó de câmera interno. Permissões de userspace não acrescentam os drivers ausentes.
 
 ## Bluetooth QCA6390
 
-O UART correto e o baud já haviam sido conferidos. A inicialização falha no
-pedido de versão `0xfc00`, antes do carregamento de patch/NVM: trocar firmware
-sem resolver essa etapa não constitui correção.
+No controle com OPER3Mbaud, a inicialização falha no pedido de versão
+`0xfc00`, antes de patch/NVM. A configuração UART havia sido conferida;
+isso não mede a velocidade física. Um ensaio posterior limitado a115200
+recebeu versão, conforme atualização abaixo; Bluetooth funcional segue pendente.
 
 No [bluetooth-power.c Samsung derivado](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/bluetooth/bluetooth-power.c),
 `qcomm_bt_lpm_exit_lpm_locked` aciona BT_WAKE antes de transmitir. O DT r8s
@@ -114,13 +115,47 @@ a imagem de controle inteiros, incluindo kernel, ramdisk e cabeçalho. Foi
 confirmado um único blob FDT; o legacy ID zerado, já usado pelo lk3rd deste
 porte, foi preservado. Imagens e dumps ficam somente no ambiente local.
 
-O candidato **não foi carregado**: o monitor de entrada fastboot atingiu seu
+Na primeira tentativa às07h, o candidato **não foi carregado**: o monitor atingiu seu
 prazo de25s. Uma leitura posterior confirmou lk3rd fastboot disponível, e
 foi concluído somente o retorno ao controle RAM já validado. SSH, DT3Mbaud,
 sensores/failsafe/bateria e limites originais foram conferidos após o retorno.
-O diagnóstico115200 continua sem resultado de hardware; não interpretar o
+Nessa tentativa o diagnóstico115200 ficou sem resultado de hardware; não interpretar o
 prazo do monitor como falha Bluetooth ou como rejeição da imagem candidata.
 Novos ciclos automáticos de boot e cargas foram interrompidos nesta rodada.
+
+### Rodada posterior: versão recebida a115200, patch ainda falha
+
+Após nova autorização, o monitor revelou outro problema: esta ferramenta
+lista dispositivos como `serial Android Fastboot`, não somente `serial fastboot`.
+Conferir o primeiro campo e aceitar o último campo `fastboot`, nos dois fluxos
+de saída, evita confundir esse formato com ausência do aparelho. No retorno
+observado, a entrada levou cerca de35s;25s também era um prazo insuficiente.
+
+Uma carga em RAM do candidato, preservando a partição instalada, confirmou
+no FDT vivo a única mudança de propriedade: max-speed3M para115200.
+O controlador respondeu Product0x10/SOC0x400a0200/ROM0x0200/Patch0x0d2b;
+o UART reportou TX626/RX30. O carregamento de `htbtfw20.tlv` foi iniciado,
+mas não concluído: erro de tamanho de resposta TLV. Controle restaurado
+voltou aTX40/RX0 e timeouts0xfc00. Um único candidato não estabelece causa
+física: taxa, temporização, estado e clock ainda precisam ser separados.
+
+Um diagnóstico posterior com módulos temporários manteve validações e
+registrou `got=3 expected=2 soc=7 want_ev=0 head=00 1e 03`. `want_ev`
+é o evento aguardado, não uma medição do cabeçalho HCI recebido; esses
+bytes são o payload após remoção dos cabeçalhos pelo core. A árvore espera
+dois bytes nesse caminho QCA6390. O terceiro byte não pode ser ignorado
+para declarar sucesso. Código Qualcomm antigo associa status03 aCRC de
+patch, mas esse significado ainda exige confirmar o contrato QCA6390;
+é uma hipótese, não diagnóstico definitivo.
+[Referência histórica Qualcomm](https://android.googlesource.com/platform/hardware/qcom/bt/+/5f13e7b%5E!/).
+
+O arquivo instalado tinha cabeçalho TLV coerente com tamanho do arquivo,
+Product0x10/ROM0x0200, versão de patch0x3ac0 e download_mode3. Nenhum arquivo
+de firmware foi alterado. A restauração dos módulos ultrapassou o prazo15s
+durante unload; foi concluída e conferida depois, com os arquivos originais
+intactos e parâmetros de laboratório ausentes. O ensaio proposto com firmware
+residente não começou. Novos testes ativos foram interrompidos após essa
+falha do supervisor; desenvolvimento e validação no host continuaram.
 
 ## Toque Zinitix ZT7650
 
@@ -147,7 +182,8 @@ não recebeu ACK, com `tsp_ldo_en` desabilitado após unbind. Portanto esse
 ensaio não mede o protocolo e não indica que o chip esteja defeituoso.
 Próximo trabalho: driver mínimo com reguladores/power sequencing e decoder
 corretos, sem atualização de firmware/calibração; depois validação física de
-pressionar/mover/soltar e ausência de IRQ storm. Ainda não foi implementado.
+pressionar/mover/soltar e ausência de IRQ storm. A etapa posterior abaixo
+acrescenta um protótipo input no host, ainda sem validação física.
 
 ### Modelo de decoder no host
 
@@ -230,9 +266,32 @@ Outros cuidados conferidos na fonte:
   de baixa energia/grip; seu nome não garante uma inicialização mínima.
   Selecionar e justificar o contrato necessário antes de qualquer teste I2C.
 
-Nenhuma dessas rotinas foi executada no telefone nesta análise. Firmware,
-calibração, power sequencing mínimo e tratamento físico de IRQ continuam
-pendentes; o decoder no host não resolve essas dependências.
+Essas rotinas vendor completas não foram copiadas ou executadas nesta análise.
+A etapa posterior abaixo selecionou apenas o contrato de boot residente;
+firmware update, calibração, IRQ e eventos físicos continuam pendentes.
+
+### Janela vendor e firmware residente confirmados
+
+A ramificação ZT7650/7650M usa ENABLE0x10f0 e ID0x17f0; os comandos
+0xc000/0xcc00 do driver antigo pertencem à outra ramificação. Somente ligar
+o LDO e ler registros normais devolvia o próprio endereço, inclusive com
+buffer previamente preenchido por0xa5. Abrir a janela vendor correta recebeu
+0xe650, que a referência define como ZT7650_CHIP_CODE.
+
+A sequência normal de início do firmware existente, com INTclear14f0,
+NVMinit12f0, PROGRAMstart11f0 e espera150ms, recebeu checksum0x55aa,
+revisão de chip0x0012 e firmware0x0009. Não foram emitidos WRITE_ENABLE,
+flash write/erase/upgrade, upload ou calibração/SAVE. Os ecos anteriores
+pertenciam a um estado em que os registros normais ainda não estavam
+validados; não demonstram defeito de adaptador ou firmware corrompido.
+
+O [módulo de diagnóstico](../experiments/zt7650-probe/README.md) exige ativação
+manual, uma tentativa por carga, identidade do r8s/chip e LDO off antes/depois.
+Foi removido, deixando GPIO baixo e cliente desamarrado após os ensaios.
+O protótipo input usa polling finito em vez de IRQ e foi somente compilado
+no host. Seu decoder C passou testes com sanitizadores e não impede RELEASE
+por coordenadas inválidas. Pressionar/mover/soltar e ausência de problemas
+durante input real ainda não foram comprovados. Não anunciar toque funcional.
 
 ## Som interno
 
