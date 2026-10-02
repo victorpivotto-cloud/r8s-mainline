@@ -50,3 +50,8 @@ significa Ninja terminou, sem equivaler a aprovação de runtime/renderização.
 Examinar compilerlog e journal do kernel; depois conferir máximos, failsafe,
 unidades falhas e boot. A restauração por software não cobre kernel travado.
 Pstore vazio não exclui panic quando a retenção pelo bootloader não foi provada.
+
+Uma janela seguinte de180s concluiu 30 tarefas Ninja, incluindo o
+objeto C gerado que excedeu60s, com pico55C, failsafe0, sem reset e
+limites restaurados. Demonstra progresso do build sob carga reduzida; não
+resolve a causa do reset nem aprova compilação completa ou carga irrestrita.
