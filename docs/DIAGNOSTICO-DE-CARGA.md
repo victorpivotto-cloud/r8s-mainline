@@ -88,3 +88,30 @@ desse custo. Próximo diagnóstico exige alvo menor explícito com supervisor
 revalidado, ou análise do compilador fora desse build. Congelar processos
 entre janelas também exigiria outro desenho de supervisão e não foi adotado.
 Não houve alteração de otimização ou instalação de artefatos.
+
+
+## Diagnóstico por alvo menor
+
+O supervisor agora aceita `--target src/.../objeto.c.o`. Rejeita opções,
+alvos de instalação, caminhos absolutos e componentes de travessia; passa
+um único alvo como argv depois de `--`. Antes de executar, verificar com
+`ninja -n -j1 -- <alvo>` quais dependências serão construídas. Manter a unit,
+restauração independente, guardas e limites do exemplo anterior.
+
+No comando do supervisor acrescentar, por exemplo:
+
+```sh
+--target src/compiler/nir/libnir.a.p/nir_clone.c.o
+```
+
+Esse alvo passou no aparelho: um objeto compilado em3,57s, dentro de uma
+janela máxima60s, memória45,5M, failsafe0, sem reset e com limites restaurados.
+A configuração/otimização foi preservada. Revisão pública pelo Claude e
+validação CLI precederam o teste; não houve instalação de Mesa.
+
+`object-target-complete` significa que o alvo e suas dependências concluíram.
+`no-work` indica que Ninja encontrou tudo atualizado e não demonstra carga.
+`scope=object-target` distingue esse caso do build padrão. Uma janela expirada
+continua `bounded-window-ended`; encerramento forçado137 continua falha.
+Escolher outros objetos úteis, sem repetir alvos já aprovados nem retomar o
+objeto grande sem uma nova hipótese. O build completo continua pendente.

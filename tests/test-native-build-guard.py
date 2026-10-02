@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -13,11 +14,18 @@ BASE = Path('/sys/devices/system/cpu/cpufreq')
 CAPS = {0: 1066000, 4: 1264000, 6: 1248000}
 READ = lambda p: Path(p).read_text().strip()
 BOOT = Path('/proc/sys/kernel/random/boot_id')
+def object_target(value):
+    if (not re.fullmatch(r'src/[A-Za-z0-9_./+-]+[.]o', value)
+            or any(part in ('', '.', '..') for part in value.split('/'))):
+        raise argparse.ArgumentTypeError('target must be a relative src/*.o Ninja object')
+    return value
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--state', required=True, type=Path)
 parser.add_argument('--build-dir', type=Path)
 parser.add_argument('--seconds', type=int, default=60)
 parser.add_argument('--restore', action='store_true')
+parser.add_argument('--target', type=object_target, help='one explicit src/*.o Ninja target')
 args = parser.parse_args()
 
 def restore():
@@ -120,13 +128,14 @@ try:
     for number, cap in CAPS.items():
         (BASE/f'policy{number}/scaling_max_freq').write_text(str(min(cap, old_max[str(number)])))
     sample()
-    emit({'event': 'build-start', 'seconds': args.seconds, 'jobs': 1, 'cpu': 0})
+    emit({'event': 'build-start', 'seconds': args.seconds, 'jobs': 1, 'cpu': 0, 'target': args.target})
     blocked = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
     previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
     try:
         child = subprocess.Popen(['timeout', '--signal=TERM', '--kill-after=3', str(args.seconds),
                                   'taskset', '-c', '0', 'nice', '-n', '15',
-                                  'ninja', '-C', str(args.build_dir), '-j1'],
+                                  'ninja', '-C', str(args.build_dir), '-j1',
+                                  *(['--', args.target] if args.target else [])],
                                   stdout=compiler_log, stderr=subprocess.STDOUT, start_new_session=True,
                                   preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask))
     finally:
@@ -138,9 +147,14 @@ try:
     result = child.returncode
     if result not in (0, 124):
         raise RuntimeError('native build failed: '+str(result))
-    emit({'event': 'build-complete' if result == 0 else 'bounded-window-ended',
+    compiler_log.flush()
+    no_work = result == 0 and 'no work to do.' in Path(compiler_log.name).read_text()
+    event = ('no-work' if no_work else
+             ('object-target-complete' if args.target else 'build-complete'))
+    emit({'event': event if result == 0 else 'bounded-window-ended',
           'returncode': result, 'elapsed': round(time.monotonic()-start, 2),
-          'qualification': False})
+          'qualification': False, 'target': args.target,
+          'scope': 'object-target' if args.target else 'default-build'})
     code = 0
 except Exception as error:
     emit({'event': 'abort', 'reason': str(error)})
