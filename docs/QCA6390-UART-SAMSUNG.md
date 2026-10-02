@@ -490,3 +490,23 @@ IGNORE_FORCE_PM_EN bit 2 e EXPIRE_VAL bits 25:16. Esse recurso não é o gate
 TOP de bit 21. A RA possui operações distintas para QCH; validar request,
 ignore e política de enable antes de tratá-lo como um gate CCF simples.
 Nenhum desses registros foi lido ou escrito no telefone nesta análise.
+
+### Política efetiva do Q-channel no provider Samsung
+
+Na referência auditada, a entrada UART de `clk-exynos9830.c` passa apenas
+`VCLK_GATE` ao macro `HWACG_VCLK`. O macro mantém esse flag, sem acrescentar
+`VCLK_QCH_EN` ou `VCLK_QCH_DIS`. No
+[provider composite](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/clk/samsung/composite.c),
+`cal_vclk_enable` e `cal_vclk_disable` retornam imediatamente para gate sem
+QCH_DIS. `cal_vclk_qch_init` só chama CAL quando há QCH_EN ou QCH_DIS;
+essa entrada UART não solicita tal inicialização. São os callbacks desse
+clock local; o CCF ainda administra referências e seu clock pai de bus.
+
+Isso difere do caminho genérico `ra_set_enable(QCH_TYPE)`, que chama
+`ra_req_enable_qch`: com ENABLE=0, ele modifica CLOCK_REQ; com ENABLE=1,
+retorna sem modificá-lo. Portanto, nem “enable sempre escreve bit 0” nem
+“enable UART sempre escreve request” descrevem o caminho dessa referência.
+Também não é possível deduzir daí o valor inicial deixado por bootloader,
+firmware ou outro código. Um futuro provider deve definir a política de
+Q-channel com evidência própria, preservando o controle validado até haver
+um teste discriminante. Nenhum acesso CMU ou ensaio foi realizado.
