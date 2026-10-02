@@ -108,6 +108,20 @@ a remover o comando de mudança. Não tornar isso configuração definitiva
 ou declarar correção antes de comparar resultados. Nenhum baud, DT, GPIO,
 kernel ou firmware foi alterado nesta rodada de leitura/fonte.
 
+Um candidato foi depois preparado, alterando apenas a célula BE32 de
+`max-speed` no DT do controle. A restauração dessa célula reproduziu o DT e
+a imagem de controle inteiros, incluindo kernel, ramdisk e cabeçalho. Foi
+confirmado um único blob FDT; o legacy ID zerado, já usado pelo lk3rd deste
+porte, foi preservado. Imagens e dumps ficam somente no ambiente local.
+
+O candidato **não foi carregado**: o monitor de entrada fastboot atingiu seu
+prazo de25s. Uma leitura posterior confirmou lk3rd fastboot disponível, e
+foi concluído somente o retorno ao controle RAM já validado. SSH, DT3Mbaud,
+sensores/failsafe/bateria e limites originais foram conferidos após o retorno.
+O diagnóstico115200 continua sem resultado de hardware; não interpretar o
+prazo do monitor como falha Bluetooth ou como rejeição da imagem candidata.
+Novos ciclos automáticos de boot e cargas foram interrompidos nesta rodada.
+
 ## Toque Zinitix ZT7650
 
 Comparação com [driver Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/input/touchscreen/zinitix/zt7650/zinitix_ts.c)
