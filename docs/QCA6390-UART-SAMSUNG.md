@@ -17,9 +17,11 @@ registro fracionário para o compatible exynos850. Com o rate declarado:
 |---|---:|---:|---:|---:|
 |115200|1736|107|8|115207,37 (+0,0064%)|
 |3000000|66|3|2|3030303,03 (+1,0101%)|
+|3200000|62|2|14|3225806,45 (+0,8065%)|
 
-A estimativa decorre da fonte, não de leitura dos registros programados nem de
-medição elétrica. Esses números não provam que a quantização causa a falha.
+A estimativa decorre da fonte e do clock declarado; não é medição elétrica.
+Um ensaio posterior a 3,2 Mbaud confirmou os valores dos registros acima (ver abaixo).
+Esses números não provam que a quantização causa a falha.
 
 O driver Samsung não reencoda o baud quantizado no termios depois de programar
 os divisores. `ttyport_set_baudrate` devolve `c_ospeed` e `host_set_baudrate`
@@ -41,13 +43,13 @@ ContadoresTX/RX são acumulados pelo driver e também não medem o sinal no fio.
 ## ACK e consulta após retorno somente do host
 
 O [diagnóstico ACK/fallback](../experiments/qca-baud-ack/README.md) acrescentou
-instrumentação exclusiva do Command Complete0xfc48 e uma consulta após retorno
-apenas do host a115200, se a consulta3M expirasse. Não enviou patch/NVM.
+instrumentação exclusiva do Command Complete 0xfc48 e uma consulta após retorno
+apenas do host a 115200, se a consulta3M expirasse. Não enviou patch/NVM.
 
-Versão115200 respondeu; versão3M expirou em cerca2s; a consulta após retornar
-apenas o host a115200 respondeu em cerca4ms, com os mesmos IDs/Patch0x0d2b.
-Não houve Command Complete0xfc48 capturado. TX/RX cresceram20/42bytes.
-Isso indica comunicação compatível com115200 após a solicitação de baud;
+Versão a 115200 respondeu; versão3M expirou em cerca2s; a consulta após retornar
+apenas o host a 115200 respondeu em cerca de 4 ms, com os mesmos IDs/Patch 0x0d2b.
+Não houve Command Complete 0xfc48 capturado. TX/RX cresceram20/42bytes.
+Isso indica comunicação compatível com 115200 após a solicitação de baud;
 não prova por que a transição falhou nem que nunca houve outro estado.
 Sem captura física, pacote atrasado e enquadramento perdido não estão excluídos.
 
@@ -68,7 +70,39 @@ dois lados, com o host limitado. Não executar esse teste antes de preparar
 um candidato que trate também a UART, confira baud/limites efetivos e preserve
 um controle recuperável. Não elevar clockCMU por tentativa.
 
-Próximo: conferir o caminho3,2M correspondente à HAL/Samsung, preparar no host
-instrumentação de baud/ACK/divisores e verificar suporte UART antes de outro
-ensaio. Nenhum teste3,2M foi executado. O statusTLV e a compatibilidade do
-firmware permanecem pendentes; não relaxar o parser para habilitar HCI.
+## Ensaio a 3,2 Mbaud com teto opt-in e divisores registrados
+
+O [laboratório UART/QCA a 3,2 Mbaud](../experiments/qca-uart-3200/README.md) usa um
+kernel temporário em RAM. O teto maior fica desabilitado por padrão e só vale
+para a UART Bluetooth com compatible/endereço conferidos. O DT continua em 3 Mbaud.
+O módulo QCA seleciona 3,2 Mbaud somente com flag de laboratório e aborta antes de
+TLV/NVM/IBS/retries. Os logs registram pedido/seleção/clock declarado e leem
+UBRDIV/DIVSLOT/AFC durante a programação normal; a impressão ocorre fora do
+lock, depois de restaurar IRQs. Não houve alteração de clock CMU ou GPIO/mux.
+
+No ensaio único, a API e a UART selecionaram 3200000; UBRDIV=2, DIVSLOT=14,
+clock declarado 200 MHz. AFC foi 0 durante a mudança e 1 antes da consulta.
+Versão a 115200 respondeu, versão a 3,2 Mbaud expirou (-110, cerca de 2 s), e a consulta após
+retornar apenas o host a 115200 respondeu em cerca de 4 ms, com os mesmos IDs e
+Patch 0x0d2b. Não houve Command Complete 0xfc48 capturado nessa janela.
+
+Isso demonstra que o teto de 3 Mbaud foi removido para o ensaio e os divisores esperados
+foram programados; **essa mudança sozinha não resolveu a comunicação**.
+Não demonstra ipclk/baud elétrico, RTS físico, ausência de ACK no fio ou por que
+o controlador volta/responde compatível com 115200. Pacote atrasado continua
+possível porque as consultas compartilham opcode. A configuração exata da
+HAL Samsung e o significado do byte extra TLV permanecem pendentes.
+
+O Linux já espera a fila QCA e chama `serdev_device_wait_until_sent`; portanto
+não afirmar que lhe falta toda drenagem TX. Depois, QCA6390 cai no atraso de 300 ms
+antes de mudar baud do host. A HAL espera 20 ms, chama `tcdrain`, muda o host
+e lê Command Complete. Próximo: analisar essa ordem/temporização e a captura
+do ACK antes de propor outro ensaio. A diferença é hipótese de fonte; não
+prova causalidade. Não repetir 3/3,2 Mbaud inalterados,
+não mudar clock/mux às cegas nem relaxar o parser para habilitar HCI.
+
+A rodada de 30 s terminou com retiradas RC0 e restauração dos módulos originais
+confirmada por hash/srcversion. O parâmetro UART voltou a N antes da recarga.
+O kernel de controle foi restaurado em RAM e conferido, sem flags de laboratório,
+com limites originais, sensores normais e zero unidades falhas. Partições,
+firmware, DT, GPIO, clock CMU e Wi-Fi permaneceram preservados.

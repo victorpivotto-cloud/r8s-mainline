@@ -1,0 +1,139 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1189,10 +1189,23 @@
+ 	return 0;
+ }
+
++static bool r8s_qca_lab3200000;
++static unsigned int r8s_lab_selected_baud;
++module_param_named(r8s_qca_lab3200000, r8s_qca_lab3200000, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab3200000, "Lab QCA6390 version115200 then flow-gated3.2M, default off");
++
+ static int qca_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
++
++
++	/* Opt-in: baud response only; no addresses or unrelated payloads. */
++	if (r8s_qca_lab3200000 && skb->len >= 5 &&
++	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
++	    get_unaligned_le16(skb->data + 3) == 0xfc48)
++		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
++			    (int)min_t(unsigned int, skb->len - 5, 6), skb->data + 5);
+
+ 	if (test_bit(QCA_DROP_VENDOR_EVENT, &qca->flags)) {
+ 		struct hci_event_hdr *hdr = (void *)skb->data;
+@@ -1373,10 +1386,16 @@
+
+ static inline void host_set_baudrate(struct hci_uart *hu, unsigned int speed)
+ {
+-	if (hu->serdev)
+-		serdev_device_set_baudrate(hu->serdev, speed);
+-	else
++	if (hu->serdev) {
++		unsigned int selected = serdev_device_set_baudrate(hu->serdev, speed);
++
++		if (r8s_qca_lab3200000 && qca_soc_type(hu) == QCA_QCA6390) {
++			WRITE_ONCE(r8s_lab_selected_baud, selected);
++			bt_dev_warn(hu->hdev, "LAB baud API requested=%u reported=%u", speed, selected);
++		}
++	} else {
+ 		hci_uart_set_baudrate(hu, speed);
++	}
+ }
+
+ static int qca_send_power_pulse(struct hci_uart *hu, bool on)
+@@ -1421,6 +1440,10 @@
+ 				  enum qca_speed_type speed_type)
+ {
+ 	unsigned int speed = 0;
++
++	if (r8s_qca_lab3200000 && speed_type == QCA_OPER_SPEED &&
++	    qca_soc_type(hu) == QCA_QCA6390)
++		return 3200000;
+
+ 	if (speed_type == QCA_INIT_SPEED) {
+ 		if (hu->init_speed)
+@@ -1860,6 +1883,12 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
++	if (r8s_qca_lab3200000 &&
++	    (soc_type != QCA_QCA6390 || !hu->serdev ||
++	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
++	     qca_get_speed(hu, QCA_OPER_SPEED) != 3200000))
++		return -EINVAL;
++
+ 	ret = qca_check_speeds(hu);
+ 	if (ret)
+ 		return ret;
+@@ -1910,6 +1939,57 @@
+ 		goto out;
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
++
++	if (r8s_qca_lab3200000) {
++		WRITE_ONCE(r8s_lab_selected_baud, 0);
++		ret = qca_set_speed(hu, QCA_INIT_SPEED);
++		if (!ret && READ_ONCE(r8s_lab_selected_baud) != 115200)
++			ret = -ERANGE;
++		if (ret)
++			goto out;
++		bt_dev_warn(hdev, "LAB version first begin115200; no TLV/NVM");
++		ret = qca_read_soc_version(hdev, &ver, soc_type);
++		if (ret)
++			goto out;
++		if (le32_to_cpu(ver.product_id) != 0x10 ||
++		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
++		    le32_to_cpu(ver.soc_id) != 0x400a0200) {
++			ret = -ENODEV;
++			goto out;
++		}
++		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3.2M change");
++		hci_uart_set_flow_control(hu, true);
++		ret = qca_set_speed(hu, QCA_OPER_SPEED);
++		hci_uart_set_flow_control(hu, false);
++		if (!ret && READ_ONCE(r8s_lab_selected_baud) != 3200000)
++			ret = -ERANGE;
++		if (ret)
++			goto out;
++		bt_dev_warn(hdev, "LAB version3.2M request; no TLV/NVM");
++		ret = qca_read_soc_version(hdev, &ver, soc_type);
++		if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
++		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
++		    le32_to_cpu(ver.soc_id) != 0x400a0200))
++			ret = -ENODEV;
++
++		bt_dev_warn(hdev, "LAB version3.2M end ret=%d", ret);
++		if (ret == -ETIMEDOUT) {
++			/* One host-only query; no second baud command to the controller. */
++			ret = qca_set_speed(hu, QCA_INIT_SPEED);
++			if (!ret && READ_ONCE(r8s_lab_selected_baud) != 115200)
++				ret = -ERANGE;
++			if (ret)
++				goto out;
++			bt_dev_warn(hdev, "LAB host-only115200 query; no new baud command");
++			ret = qca_read_soc_version(hdev, &ver, soc_type);
++			if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
++			    le16_to_cpu(ver.rom_ver) != 0x0200 ||
++			    le32_to_cpu(ver.soc_id) != 0x400a0200))
++				ret = -ENODEV;
++			bt_dev_warn(hdev, "LAB host-only115200 end ret=%d; diagnostic abort", ret);
++		}
++		goto out;
++	}
+
+ 	switch (soc_type) {
+ 	case QCA_WCN3988:
+@@ -1987,6 +2067,10 @@
+ 	}
+
+ out:
++	if (r8s_qca_lab3200000) {
++		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
++		return ret ? ret : -ECANCELED;
++	}
+ 	if (ret && retries < MAX_INIT_RETRIES) {
+ 		bt_dev_warn(hdev, "Retry BT power ON:%d", retries);
+ 		qca_power_shutdown(hu);
