@@ -449,3 +449,22 @@ O [cal_data.c selecionado](https://github.com/ExtremeXT/android_kernel_samsung_e
 inclui diretamente as tabelas node, SFR, VCLK e LUT auditadas acima.
 Essa seleção de fonte não identifica a revisão física do telefone nem o
 estado de seus clocks após boot; essas verificações continuam pendentes.
+
+### Integração com o porte mainline e semântica do gate
+
+No `clk-exynos990.c` do porte local auditado, o CMU TOP já registra
+`mout_cmu_peric1_ip` → `gout_cmu_peric1_ip` → `dout_cmu_peric1_ip`, com os
+mesmos offsets e pais CAL listados acima. O driver registra TOP, HSI0 e AUD;
+a parte local de PERIC1 e seu mux/divisor UART ainda precisa ser modelada.
+Isso descreve a fonte do porte, sem comprovar o estado dos clocks no boot.
+
+O [helper Samsung do Linux](https://github.com/torvalds/linux/blob/v6.12-rc5/drivers/clk/samsung/clk-exynos-arm64.c)
+prepara gates listados em `clk_regs`: habilita modo manual no bit 20 e
+limpa HWACG no bit 28 antes de registrar os clocks. Assim, o gate no bit 21
+não deve ser reinterpretado isoladamente como erro de implementação.
+Na [RA Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/ra.c),
+`ra_set_gate` seleciona controle CG_VALUE ou automático conforme MANUAL;
+`ra_recalc_rate` aplica divisor de `valor + 1`. Uma implementação PERIC1
+precisa manter coerência entre recursos, inicialização e rate recalc, sem
+transplantar escritas CAL por tentativa. Nenhuma mudança de driver ou ensaio
+foi realizado nesta comparação.
