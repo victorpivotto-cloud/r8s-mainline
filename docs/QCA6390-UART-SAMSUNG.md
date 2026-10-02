@@ -350,3 +350,33 @@ ausentes, limites originais e máscaras de falha zero. Nenhuma unidade falha
 ou diagnóstico ativo permaneceu; logs novos sem warnings. Nenhuma partição
 foi gravada. Bluetooth continua sem HCI funcional; a qualificação de 24 h
 permanece adiada.
+
+## Comparação de fonte: divisor e clock no driver Samsung de referência
+
+O [driver Samsung examinado](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/tty/serial/samsung.c)
+tem duas diferenças relevantes: `s3c24xx_serial_getclk` solicita
+`clk_set_rate` para `src_clk_rate` e lê o rate do provider; `set_termios`
+compara os divisores inteiros adjacentes e escolhe a menor diferença de baud,
+sem permitir carry da fração para um quociente já fixado. O default de fonte
+nessa referência é 200 MHz. A cópia auditada coincide byte a byte com a revisão
+fixada no link. Isso não comprova a configuração do Android deste aparelho.
+
+Estimativas calculadas a partir dessas rotinas, **se ipclk for 200 MHz**:
+
+| Pedido | Divisor mainline | Divisor vendor | Fração vendor | Baud vendor estimado |
+|---|---:|---:|---:|---:|
+|115200|1736|1736|8|115207,37|
+|1000000|200|200|8|1000000,00|
+|3000000|66|67|3|2985074,63|
+|3200000|62|63|15|3174603,17|
+
+O `has_fracval` usa uma fração numérica nos dois caminhos; não se encontrou
+evidência para substituir esse formato pela antiga tabela de bits UDIVSLOT.
+O fixed-clock do porte não executa a configuração do CMU real. Ler novamente
+clk_summary não verifica essa configuração elétrica.
+
+Nenhuma mudança de divisor/clock ou teste ativo foi feito nesta comparação.
+O ensaio negativo a 1 Mbaud limita a hipótese de arredondamento como causa
+suficiente, sem comprovar suporte dessa velocidade pelo ROM. Antes de outra
+variante, é necessária evidência independente do clock/sinais ou do contrato
+do controlador; não transplantar `clk_set_rate` para um provider fictício.
