@@ -44,7 +44,7 @@ ContadoresTX/RX são acumulados pelo driver e também não medem o sinal no fio.
 
 O [diagnóstico ACK/fallback](../experiments/qca-baud-ack/README.md) acrescentou
 instrumentação exclusiva do Command Complete 0xfc48 e uma consulta após retorno
-apenas do host a 115200, se a consulta3M expirasse. Não enviou patch/NVM.
+apenas do host a 115200, se a consulta a 3M expirasse. Não enviou patch/NVM.
 
 Versão a 115200 respondeu; versão3M expirou em cerca2s; a consulta após retornar
 apenas o host a 115200 respondeu em cerca de 4 ms, com os mesmos IDs/Patch 0x0d2b.
@@ -54,7 +54,7 @@ não prova por que a transição falhou nem que nunca houve outro estado.
 Sem captura física, pacote atrasado e enquadramento perdido não estão excluídos.
 
 Supervisor30s e originais restaurados, retiradasRC0/flag ausente/mesmo boot/
-máscaras0/limites originais/zero unidades falhas. Build W=1 sem avisos, fonte
+máscaras 0/limites originais/zero unidades falhas. Build W=1 sem avisos, fonte
 restaurada byte por byte. Nenhum GPIO/CMU/firmware/partição/Wi-Fi alterado.
 
 ## Diferença adicional: Hastings3,2M e teto do driver Samsung3M
@@ -156,3 +156,38 @@ na UART, de descarte anterior ao parser ou de uma resposta parcial. O próximo
 laboratório deve distinguir contadores da UART, bytes entregues ao serdev/H4 e
 eventos completos por fase, sem registrar payloads ou endereços de outros
 comandos. Nenhum ensaio dessa instrumentação foi executado nesta rodada.
+
+
+## Contagem RX por fase: nenhum byte entregue ao H4 no baud alto
+
+O [diagnóstico RX por fase](../experiments/qca-rxphase/README.md) manteve o
+ensaio 3M/20 ms e acrescentou apenas contadores privados atômicos antes do H4 e
+nos eventos completos, com uma execução por carga do módulo. Não mudou baud,
+comandos, decoder ou configurações da UART.
+
+Fases 1 e 5 (versão 115200 inicial/final): cada uma teve uma chamada RX, 21 bytes,
+um evento completo. Fases 2/3/4 (troca de baud/consulta a 3M/retorno host): zero
+chamadas/bytes/eventos. Em todas, 0 erros H4/recusas REGISTERED/CCfc48 e estado
+parcial final 0. O agregado UART cresceu 42 bytes RX/20 TX; RX coincide com os dois
+pacotes de versão. Sem campos de erro adicionais na listagem serial.
+
+Portanto, nesta rodada não houve bytes chegando ao QCA/H4 nas janelas da
+mudança de baud ou consulta a 3M. Não atribuir ausência de ACK a um parser que tenha
+rejeitado esse evento completo: ele não recebeu bytes nessas fases. Os
+contadores não medem sinal no fio, não provam que o chip ficou mudo nem
+excluem descarte anterior à contagem UART ou uma resposta fora da janela.
+Snapshots e fases são best-effort, não correlação física de cada consulta.
+
+Rodada de 30 s/retiradas RC0/restauração por hash/srcversion/flags/saúde confirmadas;
+mesmo kernel/boot/máscaras 0/limitesoriginais/zero unidades falhas. Sem reboot,
+TLV/NVM/IBS/retries, firmware/clock/GPIO/DT/partição/Wi-Fi alterados.
+
+Próximo: confirmar entrega TX de 0xfc48 antes da mudança de baud e conferir o
+caminho UART/controlador. Na fonte, `qca_dequeue` retira o skb da fila; o
+`hci_uart_write_work` serdev pode manter o resto em `hu->tx_skb` se a escrita
+for parcial. Por isso fila QCA vazia não prova que todo o comando já foi
+aceito pela TTY antes da chamada `wait_until_sent`. Essa é uma possibilidade
+da fonte, não uma falha observada neste ensaio; não aplicar um ajuste por
+presunção. Separar os registros de retirada da fila, aceite pela escrita e
+contadores UART, sem capturar outros payloads. Nenhum ensaio TX novo foi
+executado nesta rodada.

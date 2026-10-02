@@ -1,0 +1,206 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -16,6 +16,7 @@
+  */
+
+ #include <linux/kernel.h>
++#include <linux/atomic.h>
+ #include <linux/clk.h>
+ #include <linux/completion.h>
+ #include <linux/debugfs.h>
+@@ -138,6 +139,10 @@
+ } __packed;
+
+ struct qca_data {
++	/* Private opt-in lab counters; no packet payloads. */
++	atomic_t lab_phase;
++	atomic_t lab_calls[6], lab_bytes[6], lab_unregistered[6];
++	atomic_t lab_errors[6], lab_events[6], lab_ack[6], lab_partial[6];
+ 	struct hci_uart *hu;
+ 	struct sk_buff *rx_skb;
+ 	struct sk_buff_head txq;
+@@ -565,6 +570,7 @@
+ {
+ 	struct qca_serdev *qcadev;
+ 	struct qca_data *qca;
++	unsigned int lab_i;
+
+ 	BT_DBG("hu %p qca_open", hu);
+
+@@ -574,6 +580,17 @@
+ 	qca = kzalloc(sizeof(*qca), GFP_KERNEL);
+ 	if (!qca)
+ 		return -ENOMEM;
++
++	atomic_set(&qca->lab_phase, 0);
++	for (lab_i = 0; lab_i < 6; lab_i++) {
++		atomic_set(&qca->lab_calls[lab_i], 0);
++		atomic_set(&qca->lab_bytes[lab_i], 0);
++		atomic_set(&qca->lab_unregistered[lab_i], 0);
++		atomic_set(&qca->lab_errors[lab_i], 0);
++		atomic_set(&qca->lab_events[lab_i], 0);
++		atomic_set(&qca->lab_ack[lab_i], 0);
++		atomic_set(&qca->lab_partial[lab_i], 0);
++	}
+
+ 	skb_queue_head_init(&qca->txq);
+ 	skb_queue_head_init(&qca->tx_wait_q);
+@@ -1189,18 +1206,41 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab_baud20;
+-module_param_named(r8s_qca_lab_baud20, r8s_qca_lab_baud20, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab_baud20, "Lab QCA6390 3M baud delay20ms and version, default off");
++static bool r8s_qca_lab_rxphase;
++static atomic_t r8s_lab_run_claimed = ATOMIC_INIT(0);
++module_param_named(r8s_qca_lab_rxphase, r8s_qca_lab_rxphase, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_rxphase, "Lab one-shot QCA6390 RX phase counters at 3M/20ms, default off");
++
++static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
++{
++	unsigned int i;
++
++	for (i = 1; i < 6; i++)
++		bt_dev_warn(hdev, "LAB RX phase=%u calls=%d bytes=%d unregistered=%d h4errors=%d events=%d ackfc48=%d lastpartial=%d",
++			    i, atomic_read(&qca->lab_calls[i]),
++			    atomic_read(&qca->lab_bytes[i]),
++			    atomic_read(&qca->lab_unregistered[i]),
++			    atomic_read(&qca->lab_errors[i]),
++			    atomic_read(&qca->lab_events[i]),
++			    atomic_read(&qca->lab_ack[i]),
++			    atomic_read(&qca->lab_partial[i]));
++}
+
+ static int qca_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
+-
++	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++
++	if (lab_phase > 0 && lab_phase < 6) {
++		atomic_inc(&qca->lab_events[lab_phase]);
++		if (skb->len >= 5 && skb->data[0] == HCI_EV_CMD_COMPLETE &&
++		    get_unaligned_le16(skb->data + 3) == 0xfc48)
++			atomic_inc(&qca->lab_ack[lab_phase]);
++	}
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab_baud20 && skb->len >= 5 &&
++	if (r8s_qca_lab_rxphase && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1271,9 +1311,18 @@
+ static int qca_recv(struct hci_uart *hu, const void *data, int count)
+ {
+ 	struct qca_data *qca = hu->priv;
+-
+-	if (!test_bit(HCI_UART_REGISTERED, &hu->flags))
++	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	bool lab_active = lab_phase > 0 && lab_phase < 6;
++
++	if (lab_active && count > 0) {
++		atomic_inc(&qca->lab_calls[lab_phase]);
++		atomic_add(count, &qca->lab_bytes[lab_phase]);
++	}
++	if (!test_bit(HCI_UART_REGISTERED, &hu->flags)) {
++		if (lab_active)
++			atomic_inc(&qca->lab_unregistered[lab_phase]);
+ 		return -EUNATCH;
++	}
+
+ 	qca->rx_skb = h4_recv_buf(hu->hdev, qca->rx_skb, data, count,
+ 				  qca_recv_pkts, ARRAY_SIZE(qca_recv_pkts));
+@@ -1281,8 +1330,14 @@
+ 		int err = PTR_ERR(qca->rx_skb);
+ 		bt_dev_err(hu->hdev, "Frame reassembly failed (%d)", err);
+ 		qca->rx_skb = NULL;
++		if (lab_active) {
++			atomic_inc(&qca->lab_errors[lab_phase]);
++			atomic_set(&qca->lab_partial[lab_phase], 0);
++		}
+ 		return err;
+ 	}
++	if (lab_active)
++		atomic_set(&qca->lab_partial[lab_phase], !!qca->rx_skb);
+
+ 	return count;
+ }
+@@ -1377,7 +1432,7 @@
+ 		break;
+
+ 	case QCA_QCA6390:
+-		if (r8s_qca_lab_baud20) {
++		if (r8s_qca_lab_rxphase) {
+ 			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
+ 			msleep(20);
+ 		} else {
+@@ -1881,11 +1936,14 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab_baud20 &&
++	if (r8s_qca_lab_rxphase &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3000000))
+ 		return -EINVAL;
++
++	if (r8s_qca_lab_rxphase && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
++		return -ECANCELED;
+
+ 	ret = qca_check_speeds(hu);
+ 	if (ret)
+@@ -1938,10 +1996,11 @@
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab_baud20) {
++	if (r8s_qca_lab_rxphase) {
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 		if (ret)
+ 			goto out;
++		atomic_set(&qca->lab_phase, 1);
+ 		bt_dev_warn(hdev, "LAB version first begin115200; no TLV/NVM");
+ 		ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 		if (ret)
+@@ -1953,11 +2012,13 @@
+ 			goto out;
+ 		}
+ 		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
++		atomic_set(&qca->lab_phase, 2);
+ 		hci_uart_set_flow_control(hu, true);
+ 		ret = qca_set_speed(hu, QCA_OPER_SPEED);
+ 		hci_uart_set_flow_control(hu, false);
+ 		if (ret)
+ 			goto out;
++		atomic_set(&qca->lab_phase, 3);
+ 		bt_dev_warn(hdev, "LAB version3M request; no TLV/NVM");
+ 		ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 		if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+@@ -1967,10 +2028,12 @@
+
+ 		bt_dev_warn(hdev, "LAB version3M end ret=%d", ret);
+ 		if (ret == -ETIMEDOUT) {
++			atomic_set(&qca->lab_phase, 4);
+ 			/* One host-only query; no second baud command to the controller. */
+ 			ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 			if (ret)
+ 				goto out;
++			atomic_set(&qca->lab_phase, 5);
+ 			bt_dev_warn(hdev, "LAB host-only115200 query; no new baud command");
+ 			ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 			if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+@@ -2058,7 +2121,9 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab_baud20) {
++	if (r8s_qca_lab_rxphase) {
++		atomic_set(&qca->lab_phase, 0);
++		qca_lab_rx_dump(hdev, qca);
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
+ 		return ret ? ret : -ECANCELED;
+ 	}
