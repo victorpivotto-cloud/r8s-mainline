@@ -49,6 +49,7 @@ de watchdog de hardware qualificado permanecem limitações.
 - [ACPM, DVFS e térmica](ACPM-DVFS-TERMICA.md).
 - [Reboot lk3rd](REBOOT-LK3RD.md).
 - [GPU Mali-G77](GPU-MALI-G77.md).
+- [Diagnóstico de carga limitada](DIAGNOSTICO-DE-CARGA.md).
 - [Qualificação finita](QUALIFICACAO.md).
 - [Investigação dos periféricos](PERIFERICOS-PENDENTES.md).
 - [Diagnóstico de bateria](BATERIA-HEALTH.md).
