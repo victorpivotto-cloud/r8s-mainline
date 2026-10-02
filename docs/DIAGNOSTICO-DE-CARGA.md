@@ -71,3 +71,20 @@ Pico de memória404,3M, CPU174,914s; limites restaurados e mesmo boot,
 sem novos erros DVFS ou reset. O número de tarefas por janela depende do
 custo dos objetos: medir o próximo comando antes de repetir uma janela que
 não conclua objeto. A compilação inteira continua pendente.
+
+
+## Gargalo que interrompe a continuação automática
+
+O próximo objeto, `nir_constant_expressions.c.o`, vem de C gerado com
+1264086 bytes e usa `-O3`. Uma janela completa de180s não concluiu esse
+objeto; somente o gerador git_sha1 terminou. CPU174,158s, pico de memória
+577,9M. O boot foi preservado, failsafe permaneceu zero e os três máximos
+foram restaurados, sem novos erros DVFS ou compiladores órfãos.
+
+A continuação desse build foi suspensa. Ninja reinicia a compilação de um
+objeto interrompido; duas janelas não somam progresso dentro dele. Não
+repetir a mesma janela, aumentar limites ou concluir instabilidade a partir
+desse custo. Próximo diagnóstico exige alvo menor explícito com supervisor
+revalidado, ou análise do compilador fora desse build. Congelar processos
+entre janelas também exigiria outro desenho de supervisão e não foi adotado.
+Não houve alteração de otimização ou instalação de artefatos.
