@@ -173,3 +173,21 @@ confirmar formato e sequência RX durante transações normais, sem provocar
 timeout. Quarentenar um número de sequência, sozinho, não correlaciona o
 bit de ACK e não demonstra solução. Claude revisou a comparação textual;
 flag local e geometria foram conferidos independentemente em fonte/log.
+
+
+### TYPE_BUFFER e interrupções vendor
+
+No mesmo fonte vendor, `channel_init` lê `type` e `ap_poll` da tabela SRAM;
+os endereços RX/TX também vêm dessa tabela. Para canais sem polling, a IRQ
+limpa o ACK antes de a thread chamar `dequeue_policy`. Quando `type` é
+TYPE_BUFFER, essa função copia o slot RX para callbacks e retorna, sem
+comparar sequência e sem `complete`. A conclusão usada por
+`acpm_ipc_send_data_sync` ocorre no outro ramo, que percorre a fila.
+O setter DVFS citado usa `send_data_lazy`, não esse envio síncrono.
+
+O porte atual lê `mlen`, `poll_completion`, `id` e `qlen`, sem registrar um
+campo `type`; por isso **qlen1 não comprova TYPE_BUFFER vendor**. Também não
+se pode atribuir ao caminho sem polling a correlação observada no caminho
+polling. Para definir recuperação, ainda falta conferir a versão/layout da
+tabela SRAM e o significado do RX/ACK do canal5. Evitar transplantar o envio
+vendor, que pressupõe fila circular, para um slot único sem esse mapeamento.
