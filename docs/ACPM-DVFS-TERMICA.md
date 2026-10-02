@@ -342,3 +342,36 @@ clear/readback, RX sobrescrito, sequência expirada reutilizada, timeout total
 limitado e ownership entre clusters. O contrato de publicação RX/ACK pelo
 firmware continua pendente; não instalar recuperação baseada apenas nas
 quatro coincidências normais ou atribuir a elas a causa do reset.
+
+### Interleavings modelados e rechecagem da fila vendor
+
+O mock `tests/test-single-slot-late-ack.py` agora inclui dois casos `MODELED`,
+executados contra a função C real, com e sem0013:
+
+- Publicar uma resposta nova depois da cópia de RX e imediatamente antes de
+  limpar o ACK antigo. Sob a premissa de um bit compartilhado que acumula
+  eventos e é apagado pelo clear, o mock termina com RX novo, payload antigo
+  copiado e notificação apagada. O readback confirma a limpeza; não recupera
+  a notificação perdida nesse modelo.
+- Reutilizar uma sequência cujo RX antigo ainda está disponível. A igualdade
+  dos campos de seis bits ocorre mesmo sendo uma resposta expirada; um marcador
+  de payload obsoleto é entregue pelo helper. Sob essa premissa, igualdade
+  sozinha não prova frescor. Ele não simula o alocador
+  inteiro, tempo de vida do firmware ou todas as ordens possíveis de eventos.
+
+Essas premissas estão explícitas no teste. Os casos não demonstram a semântica
+real de set/clear do mailbox, não testam um algoritmo de recuperação novo e
+não provocam timeout no aparelho. Controles existentes de payload, ownership
+e captura opt-in continuam passando. Claude revisou somente o código público;
+foram incorporados um marcador de payload expirado, limites estáticos do MMIO
+simulado e a distinção entre copiar/limpar e comparar sequências. Os testes
+foram executados novamente depois desses ajustes.
+
+A leitura de `check_response` na referência vendor confirmou uma proteção
+específica de fila: depois de avançar RXrear e verificar RXfront, ela limpa
+INTCR1 quando a fila parece vazia, relê RXfront e escreve INTGR1 se surgiu
+uma nova entrada. Isso usa índices de produtor/consumidor para detectar
+trabalho após clear. O handler não polling limpa o bit antes de acordar a
+thread; portanto sua existência também não estabelece publicação RX/ACK
+para o slot único do canal5. Não transportar a rechecagem de fila para esse
+slot, que não oferece os mesmos índices, nem gerar interrupção manual no S20.
