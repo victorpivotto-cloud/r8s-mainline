@@ -353,3 +353,11 @@ O próximo passo é mapear sensores/CSI, clocks/power domains, IOMMU e firmware
 específicos do r8s antes de montar o pipeline V4L2. UVC USB depende de OTG;
 carregar o módulo sozinho não comprova vídeo. Não foram escritos registradores
 ISP nem executados blobs. Câmera e som internos continuam projetos de porte.
+
+### Referências externas QCA6390
+
+Comparação de cinco projetos, com revisões fixadas e limites por transporte/SoC:
+[referências QCA6390](QCA6390-REFERENCIAS.md). Dagu documenta UART funcional,
+mas seu ajuste hci_qca trata descoberta posterior; os patches btusb dos
+projetos5.10 não corrigem o downloader UART. Próximo: HAL Hastings e origem
+do firmware r8s. Esta rodada foi somente análise no host e leitura passiva.
