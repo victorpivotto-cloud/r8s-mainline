@@ -1,0 +1,38 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1557,6 +1557,9 @@
+ 		enum qca_btsoc_type soc_type = qca_soc_type(hu);
+
+ 		speed = qca_get_speed(hu, QCA_OPER_SPEED);
++		/* One-shot diagnostic: exercise fc48 without leaving known-good baud. */
++		if (r8s_qca_lab_rxphase && soc_type == QCA_QCA6390)
++			speed = 115200;
+ 		if (!speed)
+ 			return 0;
+
+@@ -2017,7 +2020,7 @@
+ 			ret = -ENODEV;
+ 			goto out;
+ 		}
+-		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
++		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated115200 command");
+ 		atomic_set(&qca->lab_phase, 2);
+ 		hci_uart_set_flow_control(hu, true);
+ 		ret = qca_set_speed(hu, QCA_OPER_SPEED);
+@@ -2025,14 +2028,14 @@
+ 		if (ret)
+ 			goto out;
+ 		atomic_set(&qca->lab_phase, 3);
+-		bt_dev_warn(hdev, "LAB version3M request; no TLV/NVM");
++		bt_dev_warn(hdev, "LAB version-after-fc48-115200 request; no TLV/NVM");
+ 		ret = qca_read_soc_version(hdev, &ver, soc_type);
+ 		if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+ 		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
+ 		    le32_to_cpu(ver.soc_id) != 0x400a0200))
+ 			ret = -ENODEV;
+
+-		bt_dev_warn(hdev, "LAB version3M end ret=%d", ret);
++		bt_dev_warn(hdev, "LAB version-after-fc48-115200 end ret=%d", ret);
+ 		if (ret == -ETIMEDOUT) {
+ 			atomic_set(&qca->lab_phase, 4);
+ 			/* One host-only query; no second baud command to the controller. */

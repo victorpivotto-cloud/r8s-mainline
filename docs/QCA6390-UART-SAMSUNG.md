@@ -191,3 +191,34 @@ da fonte, não uma falha observada neste ensaio; não aplicar um ajuste por
 presunção. Separar os registros de retirada da fila, aceite pela escrita e
 contadores UART, sem capturar outros payloads. Nenhum ensaio TX novo foi
 executado nesta rodada.
+
+
+## Aceite TX, baud inalterado e espera antes da drenagem
+
+Três diagnósticos finitos em 02/10 acrescentaram evidência ao caminho do comando
+`0xfc48`, com uma execução por módulo e aborto antes de firmware:
+
+| Experimento | Observação | Resultado de comunicação |
+|---|---|---|
+| [Aceite TX](../experiments/qca-txobserve/README.md), 3M/20ms após drain | Uma escrita aceitou5/5bytes antes de queue-empty | Timeout3M; versão responde no retorno apenas do host a115200 |
+| [Baud inalterado](../experiments/qca-baud-same/README.md), comando valor0/host115200 | Uma escrita aceitou5/5bytes; consulta seguinte respondeu | Sem ACK de baud; significado do comando inalterado não confirmado |
+| [20ms antes de drain](../experiments/qca-delay-before-drain/README.md), 3M | Mesma entrega5/5; espera+drain cerca23,328ms | Timeout3M; retorno apenas do host a115200 responde |
+
+Em todos, os únicos42bytes RX foram as duas respostas de versão; nenhum byte
+nas fases da troca, nenhum ACKfc48 ou erro H4 registrado. A corrida entre
+fila vazia e aceite integral não foi observada nestas amostras. As contagens
+não demonstram entrega elétrica ao controlador ou baud físico; o retorno void
+da drenagem não distingue sucesso de timeout. Os patches são instrumentação
+restrita, com limites de logging/tag descritos nos READMEs, e não correções
+para produção.
+
+As rodadas terminaram com retiradas RC0, hashes/srcversion/flags e limites
+originais restaurados, mesmo kernel/boot, máscaras0, sensores normais e nenhuma
+unidade falha. HCI funcional e pareamento continuam pendentes.
+
+Na referência HAL, `SocInit` só envia HCIReset após TLV/NVM e outras etapas.
+O caminho `EdlModeChange` antes do baud é exclusivo Moselle1.0/1.1 nesse fonte.
+Não transportar essas mudanças para Hastings por presunção. Próximo diagnóstico
+deve esclarecer o contrato do comando/estado do controlador e o RTS físico;
+repetir a matriz de bauds/atrasos ou relaxar parser sem evidência não resolve
+a ausência de bytes nesta etapa.

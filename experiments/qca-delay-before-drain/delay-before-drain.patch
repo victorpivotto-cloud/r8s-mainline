@@ -1,0 +1,25 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1418,6 +1418,11 @@
+ 	if (r8s_qca_lab_rxphase)
+ 		bt_dev_warn(hdev, "LAB TX queue-empty ns=%llu", ktime_get_ns());
+
++	if (r8s_qca_lab_rxphase) {
++		bt_dev_warn(hdev, "LAB baud delay20ms before TX drain ns=%llu", ktime_get_ns());
++		msleep(20);
++	}
++
+ 	if (hu->serdev)
+ 		serdev_device_wait_until_sent(hu->serdev,
+ 		      msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
+@@ -1439,8 +1444,8 @@
+
+ 	case QCA_QCA6390:
+ 		if (r8s_qca_lab_rxphase) {
+-			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
+-			msleep(20);
++			/* Delay already applied before drain, matching HAL ordering. */
++			bt_dev_warn(hdev, "LAB no second baud delay; host switch next");
+ 		} else {
+ 			msleep(300);
+ 		}

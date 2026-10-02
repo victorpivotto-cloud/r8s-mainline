@@ -1,0 +1,66 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1415,9 +1415,15 @@
+ 	while (!skb_queue_empty(&qca->txq))
+ 		usleep_range(100, 200);
+
++	if (r8s_qca_lab_rxphase)
++		bt_dev_warn(hdev, "LAB TX queue-empty ns=%llu", ktime_get_ns());
++
+ 	if (hu->serdev)
+ 		serdev_device_wait_until_sent(hu->serdev,
+ 		      msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
++
++	if (r8s_qca_lab_rxphase)
++		bt_dev_warn(hdev, "LAB TX drain-return ns=%llu", ktime_get_ns());
+
+ 	/* Give the controller time to process the request */
+ 	switch (qca_soc_type(hu)) {
+--- a/drivers/bluetooth/hci_serdev.c
++++ b/drivers/bluetooth/hci_serdev.c
+@@ -12,6 +12,9 @@
+  */
+
+ #include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/atomic.h>
++#include <linux/ktime.h>
+ #include <linux/types.h>
+ #include <linux/serdev.h>
+ #include <linux/skbuff.h>
+@@ -20,6 +23,13 @@
+ #include <net/bluetooth/hci_core.h>
+
+ #include "hci_uart.h"
++
++/* Diagnostic flag is read-only and defaults off; no transmitted payload log. */
++static bool r8s_serdev_lab_tx;
++module_param(r8s_serdev_lab_tx, bool, 0400);
++MODULE_PARM_DESC(r8s_serdev_lab_tx, "Lab QCA baud-command write results, default off");
++static atomic_t r8s_lab_write_logs = ATOMIC_INIT(0);
++#define R8S_LAB_BAUD_MARK 0x72387342
+
+ static inline void hci_uart_tx_complete(struct hci_uart *hu, int pkt_type)
+ {
+@@ -70,8 +80,21 @@
+ 		while ((skb = hci_uart_dequeue(hu))) {
+ 			int len;
+
++			/* Mark only the known five-byte baud command, preserving partial retries. */
++			if (r8s_serdev_lab_tx && hu->proto->id == HCI_UART_QCA &&
++			    skb->len == 5 && hci_skb_pkt_type(skb) == HCI_COMMAND_PKT &&
++			    skb->data[0] == 0x01 && skb->data[1] == 0x48 &&
++			    skb->data[2] == 0xfc && skb->data[3] == 0x01)
++				skb->mark = R8S_LAB_BAUD_MARK;
++
+ 			len = serdev_device_write_buf(serdev,
+ 						      skb->data, skb->len);
++			/* Bounded logging; accepted bytes are not proof of physical transmission. */
++			if (r8s_serdev_lab_tx && hu->proto->id == HCI_UART_QCA &&
++			    skb->mark == R8S_LAB_BAUD_MARK &&
++			    atomic_inc_return(&r8s_lab_write_logs) <= 8)
++				bt_dev_warn(hdev, "LAB TX write wanted=%u accepted=%d ns=%llu",
++					    skb->len, len, ktime_get_ns());
+ 			hdev->stat.byte_tx += len;
+
+ 			skb_pull(skb, len);
