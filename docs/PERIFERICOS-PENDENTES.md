@@ -73,6 +73,41 @@ os valores do DT efetivo e o momento do primeiro pedido de versão em fonte,
 antes de propor uma alteração de sequência. Preservar a
 alimentação compartilhada e o Wi-Fi funcional.
 
+### Baud antes do primeiro pedido de versão
+
+A leitura do DT em uso confirmou `max-speed=3000000` no nó QCA6390.
+O grupo UART seleciona gpq0-3/-1/-0, função2, pull3 e drive0. Isso registra
+configuração, sem medir níveis elétricos ou a velocidade efetivamente obtida.
+
+Na fonte usada, `qca_open` copia `max-speed` para `hu->oper_speed`. O protocolo
+define INIT115200 e OPER3000000. Para QCA6390, `qca_setup` configura INIT,
+solicita OPER e só depois chama `qca_read_soc_version`. A ordem difere da
+ramificação WCN399x, que consulta a versão antes de solicitar OPER.
+Logo, verificar apenas o baud inicial115200 não caracteriza a velocidade
+usada na tentativa de versão do caminho QCA6390.
+
+`qca_set_speed(OPER)` chama `qca_set_baudrate`, depois altera o baud do host.
+O primeiro helper envia o comando0xfc48, espera esvaziamento da fila/envio
+serdev e, nesse caminho, aguarda300ms; ele retorna sem aguardar confirmação
+HCI desse comando. A fonte descreve a intenção de mudar para3Mbaud, não
+comprova que o controlador aceitou ou que o UART atingiu essa velocidade.
+O pedido0xfc00 acontece depois, ainda antes de patch/NVM. IBS permanece
+desabilitado durante setup; seu wake em banda não resolve automaticamente
+essa fase inicial.
+
+Hipótese nova: caso o controlador ignore a mudança de baud por estar em
+estado inadequado, pode surgir desencontro entre host e controlador antes
+do pedido de versão. Isso não foi medido, nem estabelece causa do timeout.
+TX40/RX0 não é uma captura de protocolo e não identifica quais bytes chegaram
+ao controlador.
+
+Um eventual diagnóstico isolado com OPER limitado a115200 testaria a
+dependência da falha de uma velocidade maior, preservando os outros fatores.
+Mesmo assim o caminho continuaria enviando0xfc48; limitar OPER não equivale
+a remover o comando de mudança. Não tornar isso configuração definitiva
+ou declarar correção antes de comparar resultados. Nenhum baud, DT, GPIO,
+kernel ou firmware foi alterado nesta rodada de leitura/fonte.
+
 ## Toque Zinitix ZT7650
 
 Comparação com [driver Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/input/touchscreen/zinitix/zt7650/zinitix_ts.c)
