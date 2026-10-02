@@ -146,3 +146,22 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
     tests/test-zt7650-kernel-decoder.c -o /tmp/zt7650-decoder-test
 /tmp/zt7650-decoder-test
 ```
+
+## Pendências antes de um candidato com IRQ
+
+A [fonte Samsung ZT7650 auditada](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/input/touchscreen/zinitix/zt7650/zinitix_ts.c)
+registra `zt_touch_work` como thread com `IRQF_TRIGGER_FALLING | IRQF_ONESHOT`.
+O handler rejeita GPIO de interrupção alto; `ts_read_coord` termina enviando
+CLEAR_INT_STATUS. O nó legado do porte declara nível baixo, e o protótipo
+acima não registra IRQ. Os ensaios de polling não validam disparo, drenagem,
+ACK ou recuperação de interrupções; a diferença de trigger exige validação
+própria, sem alterar o DT somente para reproduzir um flag vendor.
+
+Um candidato finito deve tratar ACK/transferência incompletos, limitar erros
+e parar a IRQ antes de desligar o regulador. Remoção e prazo precisam
+sincronizar a thread fora do mutex usado pela leitura, liberar todos os slots
+e deixar o cliente desamarrado. Não transplantar o ACK vendor sem verificar
+seu retorno: o protótipo atual só publica o lote após leitura e ACK completos.
+Gestos, suspensão/retomada e operação permanente continuam sem validação.
+Nenhum handler IRQ, mudança de trigger ou teste no aparelho foi feito nesta
+revisão de fonte.
