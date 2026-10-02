@@ -307,3 +307,38 @@ recuperação ou atribuir o reset a ACK tardio com base nesse teste.
 Caminho do parâmetro observado nesse build:
 `/sys/module/acpm_protocol/parameters/single_slot_diag_once`.
 ManterN fora de uma captura deliberada e limitada.
+
+### Sequências distintas no fluxo normal
+
+Uma segunda rodada armou até três capturas, esperando apenas atividade
+normal do governador, no máximo10s por captura. As três foram consumidas;
+todas mostraram TX/RX iguais, com sequências distintas entre si e da primeira
+rodada. São quatro amostras no total, todas com `rxcnt=0`. O parâmetro foi
+confirmado emN após a rodada, sem reset, novos erros DVFS, falhas de unidades
+ou alterações dos limites. Sensores e bateria permaneceram normais.
+
+Isso é evidência de correlação no fluxo normal e afasta a hipótese de um único
+valor RX fixo para essas amostras. Não comprova frescor após timeout, ordenação
+RX/ACK pelo firmware ou funcionamento sob carga. Não repetir essas capturas
+sem uma hipótese nova; o próximo trabalho é analisar o protocolo e seus
+interleavings em fonte/modelo, sem provocar timeout no aparelho.
+
+Claude revisou um resumo técnico público, com ferramentas/MCP desabilitados.
+A análise destacou condições ainda desconhecidas: chegada de novo ACK entre
+leitura e limpeza do ACK antigo, sobrescrita do slot RX e reutilização da
+sequência após circular seu campo de seis bits. São cenários a modelar, não
+comportamentos já demonstrados no firmware. Uma comparação de sequência
+sozinha não estabelece recuperação segura nessas condições.
+
+A leitura do chamador `z3s_target_index` confirmou que `cur_khz` só é atualizado
+quando `set_rate` retorna sucesso, sob o mutex compartilhado. Em erro, mantém
+o valor anterior; `z3s_get` devolve esse cache, sem medir o clock físico.
+Assim, não registrar a frequência solicitada em erro já está implementado,
+mas isso não garante conhecer a frequência real se um comando atrasado for
+executado. Não há evidência de tal divergência neste teste.
+
+Antes de considerar recuperação, o modelo deve cobrir ACK concorrente com
+clear/readback, RX sobrescrito, sequência expirada reutilizada, timeout total
+limitado e ownership entre clusters. O contrato de publicação RX/ACK pelo
+firmware continua pendente; não instalar recuperação baseada apenas nas
+quatro coincidências normais ou atribuir a elas a causa do reset.
