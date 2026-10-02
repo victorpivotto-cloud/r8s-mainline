@@ -380,3 +380,35 @@ O ensaio negativo a 1 Mbaud limita a hipótese de arredondamento como causa
 suficiente, sem comprovar suporte dessa velocidade pelo ROM. Antes de outra
 variante, é necessária evidência independente do clock/sinais ou do contrato
 do controlador; não transplantar `clk_set_rate` para um provider fictício.
+
+## Clock Bluetooth identificado na fonte CAL: PERIC1
+
+O [DT de referência](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/arch/arm64/boot/dts/exynos/exynos9830.dts)
+liga `uart@10840000` a dois clocks: `gate_uart_clk1` (ID 123/0x7b) e
+`ipclk_uart1` (ID 148/0x94). Os IDs do binding identificam, respectivamente,
+`GATE_PERIC1_TOP0_QCH_UART_BT` e `DOUT_CLK_PERIC1_UART_BT`. O domínio dos pins
+GPIO não determina o domínio de clock do bloco UART; a cadeia de baud aqui é
+PERIC1, não um clock UART ALIVE presumido a partir dos pins.
+
+No [provider Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/clk/samsung/clk-exynos9830.c),
+o DOUT registra `VCLK_DIV_CLK_PERIC1_UART_BT`. A
+[tabela CAL](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/exynos9830/cmucal-node.c)
+define a cadeia:
+
+| Etapa | Fonte |
+|---|---|
+| Mux de entrada | `MUX_CLKCMU_PERIC1_UART_BT_USER`: `OSCCLK_PERIC1` ou `CLKCMU_PERIC1_IP` |
+| Divisor de baud | `DIV_CLK_PERIC1_UART_BT`, filho desse mux |
+| Clock do consumidor | `DOUT_CLK_PERIC1_UART_BT` / `ipclk_uart1` |
+| Gate separado | `GATE_PERIC1_TOP0_QCH_UART_BT`, registrado com pai de bus `UMUX_CLKCMU_PERIC1_BUS` |
+
+O [registro efetivo do VCLK](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/soc/samsung/cal-if/exynos9830/cmucal-vclk.c)
+usa a LUT compartilhada `cmucal_vclk_div_clk_pericx_usixx_usi_lut`, que inclui
+400 e 200 MHz. A tabela específica de UART com uma entrada 400 MHz existe,
+mas não é a LUT escolhida nesse registro: não usar sua presença isolada para
+afirmar baud source de 400 MHz.
+
+Este rastreamento identifica recursos para uma futura implementação do
+provider. Não mede o mux/divisor ou o clock atual, nem substitui a
+verificação da revisão do silício e do DT aplicado. Nenhum clock, CMU, gate,
+DT ou kernel foi alterado; o controle continua usando seu fixed-clock.
