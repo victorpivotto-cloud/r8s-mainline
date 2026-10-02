@@ -217,3 +217,24 @@ no caminho de ACK. Valor0 seria inconclusivo. Ainda é preciso confirmar base
 e versão da tabela; nenhum diagnóstico novo foi instalado no aparelho.
 Claude revisou essa inferência com os resultados sanitizados. A equivalência
 de offsets não confirma echoRX nem resolve ACK tardio.
+
+
+### Diagnóstico de inicialização preparado
+
+`patches/0012-acpm-descriptor-diagnostic.patch` acrescenta `word_0c` ao
+log existente de geometria dos canais. Lê o campo reservado com `readl`
+apenas na inicialização, sem escrever SRAM ou modificar ACK, DVFS e
+recuperação. Uma asserção de compilação fixa seu offset em0x0c.
+
+Baseline SHA256 do provider antes desse diagnóstico:
+`76e642856c7e024834f9b0839fbeb8370e26cc1939eaaf5d602a1f34dee83d52`.
+O patch aplica sobre esse baseline e reproduz exatamente o fonte compilado.
+Compilação do objeto ACPM para arm64 passou. Revisão por Claude e checkpatch
+sem exigência de assinatura passaram; isso não é submissão upstream.
+**Ainda não instalado nem validado em boot no aparelho.**
+
+O log representa uma amostra de inicialização. Valores1/2 são compatíveis
+com os rótulos QUEUE/BUFFER da referência, sem certificar ABI; zero é
+inconclusivo. Comparar sempre id/poll/mlen/qlen do mesmo canal. O diagnóstico
+não verifica echoRX, não recupera timeout e não identifica a causa do reset.
+Remover esse campo ao encerrar a investigação se não for mais útil.

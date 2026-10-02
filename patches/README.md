@@ -54,3 +54,10 @@ Runtime sources include it; sustained qualification remains pending. See `docs/A
 `0011-max17042-health-overflow.patch` widens the absent-voltage-limit arithmetic
 to s64. Source-function mock and hardware RAM boot passed; charging settings
 are unchanged. See `docs/BATERIA-HEALTH.md`.
+
+
+`0012-acpm-descriptor-diagnostic.patch` is diagnostic only: one raw shared
+memory word in the existing channel initialization log, with an offset
+assertion. arm64 object build and patch reproduction passed; hardware boot
+validation is pending. It does not fix late ACK or alter DVFS. Baseline and
+interpretation are in `docs/ACPM-DVFS-TERMICA.md`.

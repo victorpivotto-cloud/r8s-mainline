@@ -1,0 +1,41 @@
+ACPM: report raw descriptor word at channel initialization
+
+Read shared descriptor offset 0x0c once with the existing geometry log.
+Check the offset at compile time; do not assume firmware type semantics.
+No changes to transaction, ACK or recovery paths.
+
+---
+--- a/drivers/firmware/samsung/exynos-acpm.c
++++ b/drivers/firmware/samsung/exynos-acpm.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <linux/build_bug.h>
+ #include <linux/bitmap.h>
+ #include <linux/bitops.h>
+ #include <linux/cleanup.h>
+@@ -93,6 +94,8 @@
+ 	u32 reserved2[2];
+ 	u32 poll_completion;
+ };
++
++static_assert(offsetof(struct acpm_chan_shmem, reserved[2]) == 0x0c);
+ 
+ /**
+  * struct acpm_queue - exynos acpm queue.
+@@ -636,10 +639,12 @@
+ 	rx->rear = base + readl(&chan_shmem->tx_rear);
+ 	rx->front = base + readl(&chan_shmem->tx_front);
+ 
++	/* Log raw descriptor word 0x0c; vendor type semantics are unverified. */
+ 	dev_info(achan->acpm->dev,
+-		 "acpm chan idx=%d id=%d poll=%d mlen=%d qlen=%d\n",
++		 "acpm chan idx=%d id=%d poll=%d mlen=%d qlen=%d word_0c=0x%08x\n",
+ 		 (int)(achan - achan->acpm->chans), achan->id,
+-		 achan->poll_completion, achan->mlen, achan->qlen);
++		 achan->poll_completion, achan->mlen, achan->qlen,
++		 readl(&chan_shmem->reserved[2]));
+ }
+ 
+ /**
