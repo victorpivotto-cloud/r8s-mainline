@@ -1,0 +1,118 @@
+--- a/drivers/runtime/r8s-acpm-thermal.c
++++ b/drivers/runtime/r8s-acpm-thermal.c
+@@ -23,6 +23,7 @@
+ #define R8S_TMU_CHANNEL 9
+ 
+ static struct platform_device *r8s_pdev;
++static struct device *r8s_hwmon;
+ static struct acpm_handle *r8s_acpm;
+ static DEFINE_MUTEX(r8s_temp_lock);
+ /* Test hook affects Linux CPU zone reads only, never firmware registers. */
+@@ -42,6 +43,8 @@
+ 	unsigned int bad_reads;
+ 	unsigned int good_reads;
+ 	bool healthy;
++	bool enabled;
++	unsigned long next_good_sample;
+ 	unsigned long last_sample;
+ };
+ 
+@@ -79,6 +82,10 @@
+ {
+ 	struct r8s_cpu_zone *zone = thermal_zone_device_priv(tz);
+ 	int ret;
++
++	/* Sysfs reads must not release the clamp for a disabled governor. */
++	if (!zone->enabled)
++		return -EAGAIN;
+ 
+ 	if (time_after(jiffies, zone->last_sample + 5 * HZ)) {
+ 		zone->healthy = false;
+@@ -100,8 +107,12 @@
+ 	zone->bad_reads = 0;
+ 	if (!zone->healthy) {
+ 		if (*temp < 78) {
+-			if (zone->good_reads < 3)
++			if (zone->good_reads < 3 &&
++			    (!zone->good_reads ||
++			     time_after_eq(jiffies, zone->next_good_sample))) {
+ 				zone->good_reads++;
++				zone->next_good_sample = jiffies + HZ;
++			}
+ 		} else {
+ 			zone->good_reads = 0;
+ 		}
+@@ -110,6 +121,20 @@
+ 	}
+ 	exynos990_cpufreq_sensor_report(zone->first_cpu, zone->healthy);
+ 	*temp *= 1000;
++	return 0;
++}
++
++/* The thermal core serializes change_mode/get_temp under the zone lock. */
++static int r8s_zone_change_mode(struct thermal_zone_device *tz,
++                              enum thermal_device_mode mode)
++{
++	struct r8s_cpu_zone *zone = thermal_zone_device_priv(tz);
++
++	zone->enabled = mode == THERMAL_DEVICE_ENABLED;
++	zone->healthy = false;
++	zone->good_reads = 0;
++	zone->bad_reads = 0;
++	exynos990_cpufreq_sensor_report(zone->first_cpu, false);
+ 	return 0;
+ }
+ 
+@@ -134,6 +159,7 @@
+ 
+ static const struct thermal_zone_device_ops r8s_zone_ops = {
+ 	.get_temp = r8s_zone_get_temp,
++	.change_mode = r8s_zone_change_mode,
+ 	.should_bind = r8s_zone_should_bind,
+ };
+ 
+@@ -192,7 +218,6 @@
+ static int __init r8s_thermal_init(void)
+ {
+ 	struct device_node *np;
+-	struct device *hwmon;
+ 	unsigned int zone, valid = 0;
+ 	int temp, ret;
+ 
+@@ -230,10 +255,11 @@
+ 		ret = -ENODATA;
+ 		goto err;
+ 	}
+-	hwmon = devm_hwmon_device_register_with_groups(&r8s_pdev->dev,
++	r8s_hwmon = hwmon_device_register_with_groups(&r8s_pdev->dev,
+ 						     "r8s_acpm", NULL, r8s_groups);
+-	if (IS_ERR(hwmon)) {
+-		ret = PTR_ERR(hwmon);
++	if (IS_ERR(r8s_hwmon)) {
++		ret = PTR_ERR(r8s_hwmon);
++		r8s_hwmon = NULL;
+ 		goto err;
+ 	}
+ 	for (zone = 0; zone < ARRAY_SIZE(r8s_cpu_zones); zone++) {
+@@ -259,6 +285,10 @@
+ 	return 0;
+ err:
+ 	r8s_unregister_zones();
++	if (r8s_hwmon) {
++		hwmon_device_unregister(r8s_hwmon);
++		r8s_hwmon = NULL;
++	}
+ 	platform_device_unregister(r8s_pdev);
+ 	return ret;
+ }
+@@ -266,6 +296,10 @@
+ static void __exit r8s_thermal_exit(void)
+ {
+ 	r8s_unregister_zones();
++	if (r8s_hwmon) {
++		hwmon_device_unregister(r8s_hwmon);
++		r8s_hwmon = NULL;
++	}
+ 	platform_device_unregister(r8s_pdev);
+ }
+ 

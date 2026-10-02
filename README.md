@@ -214,6 +214,7 @@ Docs worth reading even if you are not porting this exact phone:
 |---|---|
 | `docs/TELA-E-CONSOLE.md` | the `getty`/`simpledrm` freeze and how to blank the screen |
 | `docs/ENERGIA-E-BOOT.md` | reboot lands in Download Mode; self power-on; charging traps |
+| `docs/USB-HOST-TEMPORIZACAO.md` | read-only vendor/mainline timing comparison; host remains unresolved |
 | `docs/QUALIFICACAO.md` | finite idle collection, approval criteria and limits |
 | `docs/LACUNAS-DE-KERNEL.md` | kernel config gaps you will hit (`IP_MULTIPLE_TABLES`, `NF_CT_NETLINK`, `nft_redir`, no watchdog) |
 

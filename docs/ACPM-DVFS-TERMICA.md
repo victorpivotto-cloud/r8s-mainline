@@ -81,3 +81,33 @@ python3 tests/test-dvfs-serialization.py \
 ```
 
 Ele compila as funções C reais e usa mailbox simulado; não valida firmware.
+
+## Candidato adicional: modo e ciclo de vida (ainda sem teste no aparelho)
+
+Revisão posterior confirmou que leituras manuais de thermal/temp podiam
+renovar heartbeat e liberar recuperação com a zona desabilitada. Três leituras
+muito rápidas também podiam satisfazer o contador de recuperação.
+
+`patches/0010-thermal-mode-hwmon-CANDIDATO.patch` acompanha change_mode,
+força clamp ao mudar modo, recusa get_temp de zona desabilitada e espaça
+amostras boas em pelo menos um segundo. Usa unregister explícito do hwmon
+nos caminhos erro/exit: o platform_device é criado sem platform_driver,
+então não se deve depender só de devres e referências para remover interfaces
+que chamam código do módulo antes do unload.
+
+O patch aplica ao módulo publicado neste repositório; não muda o provider ACPM.
+Compilação arm64 para #25 e mock das funções C reais passaram. Segunda revisão
+por Claude não encontrou bug concreto no caminho principal. **Não instalado
+nem testado no telefone**: a coleta24h usa o módulo anterior.
+
+Para testar as funções depois de aplicar o patch numa cópia:
+
+```sh
+python3 tests/test-thermal-health.py --source /copia/r8s-acpm-thermal.c
+```
+
+Validação no hardware exige disable + leituras manuais, enable/recuperação,
+falhas, unload/reload e confirmação de que nenhum hwmon antigo permanece.
+Depois de trocar o módulo, reiniciar a qualificação. Backoff/desabilitação do
+core em erro persistente pode exigir re-enable explícito. O candidato não
+resolve late ACK, calibração, falta de watchdog ou causa do reset.

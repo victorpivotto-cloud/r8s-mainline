@@ -46,3 +46,7 @@ are not.
 
 The runtime modules/tests accompany these patches. New code and modifications
 are experimental; provider/cpufreq origins remain the Exynos990 community port.
+
+`0010-thermal-mode-hwmon-CANDIDATO.patch` is a follow-up to the runtime module.
+Build and callback mock passed; hardware testing is pending. It is not part of
+the deployed/qualified state. See `docs/ACPM-DVFS-TERMICA.md`.
