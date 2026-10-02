@@ -1,0 +1,211 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -16,6 +16,7 @@
+  */
+
+ #include <linux/kernel.h>
++#include <linux/of.h>
+ #include <linux/atomic.h>
+ #include <linux/clk.h>
+ #include <linux/completion.h>
+@@ -224,6 +225,7 @@
+ };
+
+ struct qca_serdev {
++	struct gpio_desc *lab_rts;
+ 	struct hci_uart	 serdev_hu;
+ 	struct gpio_desc *bt_en;
+ 	struct gpio_desc *sw_ctrl;
+@@ -1206,10 +1208,10 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab_rxphase;
++static bool r8s_qca_lab_rts_gpio;
+ static atomic_t r8s_lab_run_claimed = ATOMIC_INIT(0);
+-module_param_named(r8s_qca_lab_rxphase, r8s_qca_lab_rxphase, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab_rxphase, "Lab one-shot QCA6390 RX phase counters at 3M/20ms, default off");
++module_param_named(r8s_qca_lab_rts_gpio, r8s_qca_lab_rts_gpio, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_rts_gpio, "Lab one-shot r8s exclusive GPIO RTS pulse at 3M, default off");
+
+ static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
+ {
+@@ -1230,7 +1232,7 @@
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rts_gpio ? atomic_read(&qca->lab_phase) : 0;
+
+ 	if (lab_phase > 0 && lab_phase < 6) {
+ 		atomic_inc(&qca->lab_events[lab_phase]);
+@@ -1240,7 +1242,7 @@
+ 	}
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab_rxphase && skb->len >= 5 &&
++	if (r8s_qca_lab_rts_gpio && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1311,7 +1313,7 @@
+ static int qca_recv(struct hci_uart *hu, const void *data, int count)
+ {
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rts_gpio ? atomic_read(&qca->lab_phase) : 0;
+ 	bool lab_active = lab_phase > 0 && lab_phase < 6;
+
+ 	if (lab_active && count > 0) {
+@@ -1415,10 +1417,10 @@
+ 	while (!skb_queue_empty(&qca->txq))
+ 		usleep_range(100, 200);
+
+-	if (r8s_qca_lab_rxphase)
++	if (r8s_qca_lab_rts_gpio)
+ 		bt_dev_warn(hdev, "LAB TX queue-empty ns=%llu", ktime_get_ns());
+
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_rts_gpio) {
+ 		bt_dev_warn(hdev, "LAB baud delay20ms before TX drain ns=%llu", ktime_get_ns());
+ 		msleep(20);
+ 	}
+@@ -1427,7 +1429,7 @@
+ 		serdev_device_wait_until_sent(hu->serdev,
+ 		      msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
+
+-	if (r8s_qca_lab_rxphase)
++	if (r8s_qca_lab_rts_gpio)
+ 		bt_dev_warn(hdev, "LAB TX drain-return ns=%llu", ktime_get_ns());
+
+ 	/* Give the controller time to process the request */
+@@ -1443,7 +1445,7 @@
+ 		break;
+
+ 	case QCA_QCA6390:
+-		if (r8s_qca_lab_rxphase) {
++		if (r8s_qca_lab_rts_gpio) {
+ 			/* Delay already applied before drain, matching HAL ordering. */
+ 			bt_dev_warn(hdev, "LAB no second baud delay; host switch next");
+ 		} else {
+@@ -1934,6 +1936,30 @@
+ 	return 0;
+ }
+
++/* Restore before devres releases the exclusively acquired descriptor. */
++static void qca_lab_rts_restore(void *data)
++{
++	struct gpio_desc *rts = data;
++
++	gpiod_set_value_cansleep(rts, 0);
++	if (gpiod_get_value_cansleep(rts) != 0)
++		pr_err("Bluetooth: LAB RTS cleanup LOW readback failed\n");
++}
++
++static int qca_lab_rts_set(struct hci_uart *hu, int value)
++{
++	struct qca_serdev *qcadev = serdev_device_get_drvdata(hu->serdev);
++	int observed;
++
++	if (!qcadev->lab_rts)
++		return -ENODEV;
++	gpiod_set_value_cansleep(qcadev->lab_rts, value);
++	observed = gpiod_get_value_cansleep(qcadev->lab_rts);
++	bt_dev_warn(hu->hdev, "LAB GPIO RTS requested=%d observed=%d ns=%llu",
++		    value, observed, ktime_get_ns());
++	return observed == value ? 0 : -EIO;
++}
++
+ static int qca_setup(struct hci_uart *hu)
+ {
+ 	struct hci_dev *hdev = hu->hdev;
+@@ -1947,13 +1973,13 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab_rxphase &&
++	if (r8s_qca_lab_rts_gpio &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3000000))
+ 		return -EINVAL;
+
+-	if (r8s_qca_lab_rxphase && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
++	if (r8s_qca_lab_rts_gpio && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
+ 		return -ECANCELED;
+
+ 	ret = qca_check_speeds(hu);
+@@ -2007,7 +2033,10 @@
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_rts_gpio) {
++		ret = qca_lab_rts_set(hu, 0);
++		if (ret)
++			goto out;
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 		if (ret)
+ 			goto out;
+@@ -2024,8 +2053,13 @@
+ 		}
+ 		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
+ 		atomic_set(&qca->lab_phase, 2);
++		ret = qca_lab_rts_set(hu, 1);
++		if (ret)
++			goto out;
+ 		hci_uart_set_flow_control(hu, true);
+ 		ret = qca_set_speed(hu, QCA_OPER_SPEED);
++		if (qca_lab_rts_set(hu, 0))
++			ret = -EIO;
+ 		hci_uart_set_flow_control(hu, false);
+ 		if (ret)
+ 			goto out;
+@@ -2132,7 +2166,9 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_rts_gpio) {
++		if (qca_lab_rts_set(hu, 0))
++			ret = -EIO;
+ 		atomic_set(&qca->lab_phase, 0);
+ 		qca_lab_rx_dump(hdev, qca);
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
+@@ -2474,6 +2510,36 @@
+ 		qcadev->btsoc_type = data->soc_type;
+ 	else
+ 		qcadev->btsoc_type = QCA_ROME;
++
++	if (r8s_qca_lab_rts_gpio) {
++		struct of_phandle_args spec;
++
++		if (qcadev->btsoc_type != QCA_QCA6390 ||
++		    !of_machine_is_compatible("samsung,r8s"))
++			return -EINVAL;
++		err = of_parse_phandle_with_args(serdev->dev.of_node,
++				"r8s-lab-rts-gpios", "#gpio-cells", 0, &spec);
++		if (err)
++			return err;
++		err = of_node_name_eq(spec.np, "gpq0-gpio-bank") &&
++		      spec.args_count == 2 && spec.args[0] == 2 && spec.args[1] == 0
++		      ? 0 : -EINVAL;
++		of_node_put(spec.np);
++		if (err)
++			return err;
++		qcadev->lab_rts = devm_gpiod_get(&serdev->dev, "r8s-lab-rts",
++					      GPIOD_OUT_LOW);
++		if (IS_ERR(qcadev->lab_rts))
++			return PTR_ERR(qcadev->lab_rts);
++		err = devm_add_action_or_reset(&serdev->dev, qca_lab_rts_restore,
++					       qcadev->lab_rts);
++		if (err)
++			return err;
++		if (gpiod_is_active_low(qcadev->lab_rts) ||
++		    gpiod_get_value_cansleep(qcadev->lab_rts) != 0)
++			return -EIO;
++		dev_warn(&serdev->dev, "LAB exclusive RTS GPIO acquired LOW\n");
++	}
+
+ 	switch (qcadev->btsoc_type) {
+ 	case QCA_WCN3988:

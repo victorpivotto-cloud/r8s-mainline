@@ -1,0 +1,170 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1206,10 +1206,11 @@
+ 	return 0;
+ }
+
+-static bool r8s_qca_lab_rxphase;
++static bool r8s_qca_lab_rxgate;
+ static atomic_t r8s_lab_run_claimed = ATOMIC_INIT(0);
+-module_param_named(r8s_qca_lab_rxphase, r8s_qca_lab_rxphase, bool, 0400);
+-MODULE_PARM_DESC(r8s_qca_lab_rxphase, "Lab one-shot QCA6390 RX phase counters at 3M/20ms, default off");
++static atomic_t r8s_lab_recv_logs = ATOMIC_INIT(0);
++module_param_named(r8s_qca_lab_rxgate, r8s_qca_lab_rxgate, bool, 0400);
++MODULE_PARM_DESC(r8s_qca_lab_rxgate, "Lab one-shot QCA6390 version115200 RX gating, default off");
+
+ static void qca_lab_rx_dump(struct hci_dev *hdev, struct qca_data *qca)
+ {
+@@ -1230,7 +1231,7 @@
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rxgate ? atomic_read(&qca->lab_phase) : 0;
+
+ 	if (lab_phase > 0 && lab_phase < 6) {
+ 		atomic_inc(&qca->lab_events[lab_phase]);
+@@ -1240,7 +1241,7 @@
+ 	}
+
+ 	/* Opt-in: baud response only; no addresses or unrelated payloads. */
+-	if (r8s_qca_lab_rxphase && skb->len >= 5 &&
++	if (r8s_qca_lab_rxgate && skb->len >= 5 &&
+ 	    skb->data[0] == HCI_EV_CMD_COMPLETE &&
+ 	    get_unaligned_le16(skb->data + 3) == 0xfc48)
+ 		bt_dev_warn(hdev, "LAB baud ACK len=%u return=%*ph", skb->len,
+@@ -1311,8 +1312,13 @@
+ static int qca_recv(struct hci_uart *hu, const void *data, int count)
+ {
+ 	struct qca_data *qca = hu->priv;
+-	int lab_phase = r8s_qca_lab_rxphase ? atomic_read(&qca->lab_phase) : 0;
++	int lab_phase = r8s_qca_lab_rxgate ? atomic_read(&qca->lab_phase) : 0;
+ 	bool lab_active = lab_phase > 0 && lab_phase < 6;
++
++	if (r8s_qca_lab_rxgate && atomic_inc_return(&r8s_lab_recv_logs) <= 8)
++		bt_dev_warn(hu->hdev, "LAB QCA RX phase=%d count=%d registered=%d ns=%llu",
++			    lab_phase, count, test_bit(HCI_UART_REGISTERED, &hu->flags),
++			    ktime_get_ns());
+
+ 	if (lab_active && count > 0) {
+ 		atomic_inc(&qca->lab_calls[lab_phase]);
+@@ -1432,7 +1438,7 @@
+ 		break;
+
+ 	case QCA_QCA6390:
+-		if (r8s_qca_lab_rxphase) {
++		if (r8s_qca_lab_rxgate) {
+ 			bt_dev_warn(hdev, "LAB baud delay20ms after TX drain; host switch next");
+ 			msleep(20);
+ 		} else {
+@@ -1936,13 +1942,13 @@
+ 	struct qca_serdev *qcadev;
+ 	const char *soc_name;
+
+-	if (r8s_qca_lab_rxphase &&
++	if (r8s_qca_lab_rxgate &&
+ 	    (soc_type != QCA_QCA6390 || !hu->serdev ||
+ 	     qca_get_speed(hu, QCA_INIT_SPEED) != 115200 ||
+ 	     qca_get_speed(hu, QCA_OPER_SPEED) != 3000000))
+ 		return -EINVAL;
+
+-	if (r8s_qca_lab_rxphase && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
++	if (r8s_qca_lab_rxgate && atomic_cmpxchg(&r8s_lab_run_claimed, 0, 1))
+ 		return -ECANCELED;
+
+ 	ret = qca_check_speeds(hu);
+@@ -1996,7 +2002,7 @@
+
+ 	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_rxgate) {
+ 		ret = qca_set_speed(hu, QCA_INIT_SPEED);
+ 		if (ret)
+ 			goto out;
+@@ -2011,37 +2017,7 @@
+ 			ret = -ENODEV;
+ 			goto out;
+ 		}
+-		bt_dev_warn(hdev, "LAB version115200 verified; one flow-gated3M change");
+-		atomic_set(&qca->lab_phase, 2);
+-		hci_uart_set_flow_control(hu, true);
+-		ret = qca_set_speed(hu, QCA_OPER_SPEED);
+-		hci_uart_set_flow_control(hu, false);
+-		if (ret)
+-			goto out;
+-		atomic_set(&qca->lab_phase, 3);
+-		bt_dev_warn(hdev, "LAB version3M request; no TLV/NVM");
+-		ret = qca_read_soc_version(hdev, &ver, soc_type);
+-		if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+-		    le16_to_cpu(ver.rom_ver) != 0x0200 ||
+-		    le32_to_cpu(ver.soc_id) != 0x400a0200))
+-			ret = -ENODEV;
+-
+-		bt_dev_warn(hdev, "LAB version3M end ret=%d", ret);
+-		if (ret == -ETIMEDOUT) {
+-			atomic_set(&qca->lab_phase, 4);
+-			/* One host-only query; no second baud command to the controller. */
+-			ret = qca_set_speed(hu, QCA_INIT_SPEED);
+-			if (ret)
+-				goto out;
+-			atomic_set(&qca->lab_phase, 5);
+-			bt_dev_warn(hdev, "LAB host-only115200 query; no new baud command");
+-			ret = qca_read_soc_version(hdev, &ver, soc_type);
+-			if (!ret && (le32_to_cpu(ver.product_id) != 0x10 ||
+-			    le16_to_cpu(ver.rom_ver) != 0x0200 ||
+-			    le32_to_cpu(ver.soc_id) != 0x400a0200))
+-				ret = -ENODEV;
+-			bt_dev_warn(hdev, "LAB host-only115200 end ret=%d; diagnostic abort", ret);
+-		}
++		bt_dev_warn(hdev, "LAB control version115200 verified; no baud/TLV/NVM");
+ 		goto out;
+ 	}
+
+@@ -2121,7 +2097,7 @@
+ 	}
+
+ out:
+-	if (r8s_qca_lab_rxphase) {
++	if (r8s_qca_lab_rxgate) {
+ 		atomic_set(&qca->lab_phase, 0);
+ 		qca_lab_rx_dump(hdev, qca);
+ 		bt_dev_warn(hdev, "LAB version-first abort ret=%d; no retry/TLV/NVM", ret);
+--- a/drivers/bluetooth/hci_serdev.c
++++ b/drivers/bluetooth/hci_serdev.c
+@@ -12,6 +12,9 @@
+  */
+
+ #include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/atomic.h>
++#include <linux/ktime.h>
+ #include <linux/types.h>
+ #include <linux/serdev.h>
+ #include <linux/skbuff.h>
+@@ -20,6 +23,11 @@
+ #include <net/bluetooth/hci_core.h>
+
+ #include "hci_uart.h"
++
++static bool r8s_serdev_lab_rxgate;
++module_param(r8s_serdev_lab_rxgate, bool, 0400);
++MODULE_PARM_DESC(r8s_serdev_lab_rxgate, "Lab bounded serdev RX readiness, default off");
++static atomic_t r8s_lab_recv_logs = ATOMIC_INIT(0);
+
+ static inline void hci_uart_tx_complete(struct hci_uart *hu, int pkt_type)
+ {
+@@ -280,6 +288,13 @@
+ 		WARN_ON(1);
+ 		return 0;
+ 	}
++
++	/* Observe before the existing ready gate, without changing its return. */
++	if (r8s_serdev_lab_rxgate &&
++	    atomic_inc_return(&r8s_lab_recv_logs) <= 8)
++		pr_warn("Bluetooth: LAB serdev RX count=%zu ready=%d registered=%d ns=%llu\n",
++			count, test_bit(HCI_UART_PROTO_READY, &hu->flags),
++			test_bit(HCI_UART_REGISTERED, &hu->flags), ktime_get_ns());
+
+ 	if (!test_bit(HCI_UART_PROTO_READY, &hu->flags))
+ 		return 0;

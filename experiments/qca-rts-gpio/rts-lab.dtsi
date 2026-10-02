@@ -1,0 +1,21 @@
+/* Diagnostic only: include LAST in the r8s board DTS, RAM boot only.
+ * Exclusive GPIO ownership replaces the static low hog for one lab trial.
+ * Never select uart1_bus_single: RTS remains a GPIO, TX/RX/CTS unchanged.
+ */
+&gpq0 {
+	/delete-node/ bt_rts_hog;
+};
+
+&uart1_bus_rts {
+	samsung,pin-val = <0>;
+	/* Preserve PUD/DRV observed with the control hog; board-specific. */
+	samsung,pin-pud = <1>;
+	samsung,pin-drv = <2>;
+};
+
+&{/soc@0/usi@108400c0/serial@10840000} {
+	pinctrl-0 = <&uart1_bus_norts &uart1_bus_rts>;
+	bluetooth {
+		r8s-lab-rts-gpios = <&gpq0 2 0>;
+	};
+};

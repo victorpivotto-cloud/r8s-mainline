@@ -251,3 +251,23 @@ zero unidades falhas, sem reboot/firmware/partição/WiFi ou qualificação24h.
 Não ignorar esse status para extrair label nem alterar parser por esse
 resultado. Ainda falta esclarecer contrato do controlador e controle físico
 de RTS; essas leituras não habilitam Bluetooth.
+
+## Exclusive RTS GPIO candidate and receive-gate control
+
+A RAM-only DT candidate replaced the static RTS-low hog with GPIO output-low
+pinctrl plus an exclusively acquired lab descriptor. GPIO CON1/DAT0/PUD1/DRV2
+matched the control. Its initial version115200 query timed out, so the guard
+never raised RTS or sent a baud command. UART counted RX21 while active QCA
+phases counted zero; the bytes were not validated or timed at the entry gate.
+The original modules and DT were restored successfully.
+
+A subsequent read-only query on the original DT observed21bytes through both
+serdev(PROTO_READY1/REGISTERED1) and QCA(phase1/REGISTERED1); version IDs matched,
+with no framing error. UART TX5/RX21 matched. This control does not locate the
+candidate's bytes or prove a GPIO ownership fault. Different boot/startup state
+and observation windows remain possible factors. The next discriminating step
+is a low-only candidate query with bounded entry-gate observations, requiring
+version success before a pulse. See
+[`qca-rts-gpio`](../experiments/qca-rts-gpio/README.md) and
+[`qca-rxgate`](../experiments/qca-rxgate/README.md). The pulse is **not tested**,
+Bluetooth remains unenabled, and24h qualification remains deferred.
