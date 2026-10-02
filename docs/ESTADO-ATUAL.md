@@ -26,8 +26,11 @@ Este documento substitui o resumo histórico de setembro.
   compositor e renderização sustentada continuam sem qualificação.
 - Bateria: corrigido overflow do limite ausente no max17042; teste da função
   real e boot em RAM confirmaram a correção de `health`. Perfil de carga intacto.
-- Toque: desamarrar o driver incompatível encerra a tempestade de IRQ;
-  isso não habilita entrada por toque.
+- Toque: driver incompatível desamarrado. IdentificaçãoZT7650/checksum e
+  entrada básica pressionar/mover/soltar passaram em um protótipo finito com
+  polling, sem IRQ. Foi removido com regulador desligado; não está instalado
+  para uso diário. Dois contatos simultâneos e solturas passaram em segunda
+  captura; gestos, precisão, suspensão e estabilidade seguem pendentes.
 
 As mudanças de kernel desta etapa foram testadas em RAM, preservando a imagem
 instalada de retorno. Não instalar permanentemente com base só nesses testes.
@@ -42,10 +45,12 @@ Carga curta de memória/hash numa CPU LITTLE completou 30 s; MID e BIG foram
 interrompidos pelo limite conservador de 70 °C. Nenhum desses testes causou
 reset, mas não reproduzem nem esclarecem o reset da compilação Mesa.
 
-Bluetooth tem nó UART/USI, mas o comando QCA ainda dá timeout. USB host detecta
+Bluetooth recebeu versão a115200, mas patch TLV falha; sem patch/NVM, o
+HCI Reset expirou. Bluetooth funcional permanece pendente. USB host detecta
 dispositivo e falha em enumeração (-71); áudio/webcam USB dependem dele.
 Som ABOX e câmera/ISP internos exigem porte de drivers. O display simpledrm
-funciona, mas falta entrada local funcional. Concessão S2MPU ampla e ausência
+funciona; o protótipo de toque finito ainda não fornece entrada local
+permanente. Concessão S2MPU ampla e ausência
 de watchdog de hardware qualificado permanecem limitações.
 
 ## Instruções reutilizáveis

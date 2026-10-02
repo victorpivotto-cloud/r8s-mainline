@@ -1,8 +1,10 @@
 # Bluetooth, toque, som e câmera: investigação do porte
 
 Resultados de01–02/10/2026, restritos à árvore6.12 usada neste projeto.
-O telefone continua sem entrada por toque/Bluetooth, placa de som interna ou
-nó de câmera interno. Permissões de userspace não acrescentam os drivers ausentes.
+O telefone continua sem Bluetooth funcional, placa de som interna ou nó de
+câmera interno. Entrada básica por toque passou em um ensaio finito posterior;
+o protótipo foi removido e não está instalado para uso diário. Permissões de
+userspace não acrescentam os drivers ausentes.
 
 ## Bluetooth QCA6390
 
@@ -157,6 +159,26 @@ intactos e parâmetros de laboratório ausentes. O ensaio proposto com firmware
 residente não começou. Novos testes ativos foram interrompidos após essa
 falha do supervisor; desenvolvimento e validação no host continuaram.
 
+O erro TLV apareceu cerca de28ms após o anúncio do download. Se o UART
+estivesse efetivamente em115200/8N1, enviar210704bytes exigiria ao menos18,3s
+sem contar cabeçalhos/esperas. O anúncio não confirma envio completo. Na fonte,
+os segmentos intermediários de modo3 usam `__hci_cmd_send`/`hci_send_frame`
+diretamente; só o último usa espera síncrona, com o mesmo opcode0xfc00.
+Uma resposta precoce é hipótese consistente, ainda sem atribuição comprovada
+a um segmento. O próximo diagnóstico deve relacionar TX efetivo, ordem de
+segmentos e CC; manter as validações de tamanho/status e não repetir o blob
+sem hipótese nova.
+
+Uma nova rodada acompanhada testou somente o fallback de firmware existente:
+OPER115200 e consulta de versão passaram, mantendo IBS desabilitado e sem
+chamar a rotina de download patch/NVM. O comando HCI padrão Reset0x0c03
+expirou(-110); a lista de controladores configurados de gerenciamento ficou
+vazia. Isso não habilitou Bluetooth e não demonstra defeito de UART: o estado
+herdado e a necessidade de patch continuam incertos. Não chamar de ROM puro
+nem aceitar retorno0 de uma consulta com lista vazia como prova funcional.
+Não houve descoberta ou pareamento. Retiradas de módulos retornaram0 nessa
+rodada, com originais restaurados, arquivos intactos e parâmetros lab ausentes.
+
 ## Toque Zinitix ZT7650
 
 Comparação com [driver Samsung](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/input/touchscreen/zinitix/zt7650/zinitix_ts.c)
@@ -288,10 +310,17 @@ validados; não demonstram defeito de adaptador ou firmware corrompido.
 O [módulo de diagnóstico](../experiments/zt7650-probe/README.md) exige ativação
 manual, uma tentativa por carga, identidade do r8s/chip e LDO off antes/depois.
 Foi removido, deixando GPIO baixo e cliente desamarrado após os ensaios.
-O protótipo input usa polling finito em vez de IRQ e foi somente compilado
-no host. Seu decoder C passou testes com sanitizadores e não impede RELEASE
-por coordenadas inválidas. Pressionar/mover/soltar e ausência de problemas
-durante input real ainda não foram comprovados. Não anunciar toque funcional.
+O protótipo input usa polling finito em vez de IRQ. Seu decoder C passou testes
+com sanitizadores e não impede RELEASE por coordenadas inválidas. Uma carga
+posterior acompanhada confirmou pressionar/mover/soltar:51 inícios e51
+solturas, com centenas de mudanças de coordenadas. Remoção retornou0, cliente
+desamarrado e regulador disabled/refs0 foram conferidos, sem erros do protótipo
+nessa janela. O [README experimental](../experiments/zt7650-probe/README.md)
+detalha os limites e o supervisor de captura. Uma segunda janela recebeu
+dois contatos simultâneos em slots separados, com solturas completas e
+coordenadas perto das bordas dentro dos limites do DT. Não há instalação
+permanente, qualificação de gestos, precisão, rejeição de palma,
+suspensão/retomada ou estabilidade prolongada.
 
 ## Som interno
 

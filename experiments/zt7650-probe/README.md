@@ -64,7 +64,7 @@ O próximo driver input requer primeiro comunicação/firmware residente
 comprovados, depois inicialização, decodificação, ACK e liberação de slots
 em erro. Não habilitar IRQ com base somente na inserção deste módulo.
 
-## Protótipo de input: somente compilado/testado no host
+## Protótipo de input: primeiro ensaio físico limitado
 
 `r8s_zt7650_input.c` usa polling de20ms e prazo automático de1..180s
 (padrão120), com `arm=false`, sem alias/autoload ou handler de IRQ. Ele
@@ -72,7 +72,8 @@ exige ID/checksum, configura modo0, cover aberto e opções básicas; valida
 o lote completo e o ACK antes de publicar multitouch. Três falhas seguidas
 liberam slots e desligam o LDO; prazo e remoção também liberam contatos.
 Só tipo normal é reportado como dedo; outros tipos liberam o slot.
-Ainda não foi carregado no aparelho. Não é driver qualificado para uso diário.
+Foi carregado em dois ensaios finitos acompanhados, sem instalação permanente.
+Não é driver qualificado para uso diário.
 
 O polling só realiza leituras quando um consumidor abre o dispositivo input,
 por exemplo `evtest`; registrar input sozinho não valida eventos. O intervalo
@@ -86,6 +87,47 @@ a falhas do regulador, reportadas como erro crítico. Shutdown também encerra
 o ensaio. Contadores de frames e eventos ajudam a distinguir polling vazio
 de contatos recebidos; não substituem pressionar/mover/soltar em `evtest`.
 
+No primeiro ensaio, o usuário pressionou, arrastou e soltou na tela. A captura
+registrou51 inícios de contato e51 solturas, com centenas de mudanças X/Y e
+último tracking ID=-1. Nenhum erro de leitura/ACK ou desligamento foi observado
+nessa janela. Após cerca de100s de captura, o módulo foi removido com retorno0;
+cliente desamarrado, estado do regulador `disabled`, refcounts0 e proteções
+inalteradas foram conferidos. Isso valida entrada básica nessa configuração;
+gestos, latência, suspensão/retomada e estabilidade prolongada continuam
+pendentes. O módulo permanece fora de autoload e `/lib/modules`.
+
+O segundo ensaio confirmou contatos simultâneos em slots separados e solturas
+completas:329 frames com pelo menos dois contatos, eixos observadosX15..1079/
+Y8..2388, sem extrapolar os limites do DT. Houve um terceiro contato de28ms,
+com possibilidade de toque adicional durante o teste; não qualifica rejeição
+de palma ou ausência de contatos espúrios. Testar perto dos cantos não equivale
+a medir precisão ou aprovar todas as bordas. Remoção e regulador disabled
+foram conferidos novamente, sem erros de leitura/ACK nessa janela.
+
+`run-input-lab.sh` reproduz a captura limitada no telefone com as proteções
+deste porte: módulo/ABI, cliente existente desamarrado, regulador único disabled,
+máscaras de failsafe0 e sensores abaixo70°C. Registra eventos somente localmente,
+usa120s no driver e janela de cerca de100s de captura. Retirada recebe prazo20s; atingir esse
+prazo é falha, pode concluir depois no kernel e não permite repetir a carga.
+O serviço transitório acrescenta um limite ao supervisor. Um erro do kernel
+ou de restauração exige conferir estado e preservar os arquivos locais.
+
+No telefone, como root, com `evtest` e o módulo compilado para sua ABI, use
+um diretório novo e mantenha `run.log`/`events.log` fora de publicações:
+
+```sh
+LAB_DIR=$(mktemp -d)
+cp /caminho/r8s_zt7650_input.ko "$LAB_DIR/"
+systemd-run --unit=zt7650-input-lab --collect \
+    --property=RuntimeMaxSec=180 --property=TimeoutStopSec=25 \
+    /bin/bash /caminho/run-input-lab.sh "$LAB_DIR"
+```
+
+Pressionar/mover/soltar durante `INPUT_CAPTURE_READY`, depois conferir
+`UNLOAD_COMMAND_RC=0` e `RESTORATION_CONFIRMED`. O marcador é restauração,
+não aprovação de eventos. Não repetir esses ensaios como rotina sem hipótese
+nova nem deixar o protótipo em autoload.
+
 A revisão com Claude foi conferida contra `init_touch`, `mini_init_touch` e
 `ts_read_coord` Samsung. Não foram acrescentadas escritas de resolução ou de
 interrupt-enable do BT541: essas funções ZT7650 não usam esse contrato. O
@@ -96,7 +138,8 @@ O decoder C compartilhado passa vetores independentes, limites, erro no
 último pacote com saída atômica, NONE e soltura com coordenadas inválidas
 sob AddressSanitizer/UndefinedBehaviorSanitizer. RELEASE valida ID, mas
 ignora posição para não impedir soltura; difere da política estrita do
-modelo Python anterior. A confirmação física pressionar/mover/soltar segue pendente.
+modelo Python anterior. A confirmação física acima não substitui esses testes
+nem qualifica o driver para uso diário.
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
