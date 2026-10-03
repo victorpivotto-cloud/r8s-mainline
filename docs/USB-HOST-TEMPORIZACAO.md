@@ -108,3 +108,6 @@ separadamente contrato/alimentação de entrada, papel de dados host, enumeraç�
 e saldo da bateria. Não deduzir corrente segura pela capacidade nominal do
 carregador, pelo limite OTG ou pela existência de AICL. A origem de
 CHGIN_OK desassertado e o estado do controlador CC/PD continuam em aberto.
+
+O mapa inicial de papéis, protocolo e dependências está em
+[USB-C-PD-DEPENDENCIAS.md](USB-C-PD-DEPENDENCIAS.md).
