@@ -183,3 +183,26 @@ Objeto arm64 W=1 compilado sem avisos; aplicação da série sem fuzz reproduziu
 exatamente fonte e header compilados. Revisão do Claude conferida localmente.
 **Somente validação no host, não carregado no S20.** Não demonstra que um
 pedido máximo ocorreu no aparelho nem determina a causa da falha com hub.
+
+## O intervalo da corrente média
+
+`max17042_get_property` exporta `CURRENT_AVG` lendo o registrador
+`AvgCurrent`; o driver não calcula uma média das coletas feitas pelo host.
+A frequência de coleta, portanto, não define o intervalo dessa média.
+
+O [datasheet MAX17047/MAX17050, revisão 7](https://www.analog.com/media/en/technical-documentation/data-sheets/max17047-max17050.pdf)
+descreve, nas páginas 24 e 38, um filtro configurável por `FilterCFG.CURR`:
+o intervalo vai de aproximadamente 0,7 s a 6,4 h; a constante de tempo no valor
+padrão de power-on é 11,25 s. Isso é a configuração padrão documentada, não
+uma medição da configuração atual de um aparelho. O datasheet também indica
+que a última média é preservada durante shutdown do medidor.
+
+Nesta base, `max17042_write_config_regs` e `max17042_override_por_values`
+podem escrever `FilterCFG` a partir de `config_data`. Esses caminhos de fonte
+não demonstram qual valor está ativo no hardware. Não assumir o padrão nem
+atribuir horas de defasagem sem conhecer a configuração efetiva.
+
+Uma comparação de alimentação deve preservar corrente instantânea, média,
+SOC e seus instantes separadamente. Um ensaio de 30 s pode verificar dados e
+erros de acesso, mas não garante acomodação do filtro desconhecido ou carga
+sustentada. Essa ressalva não autoriza mudar `FilterCFG`, corrente ou guardas.
