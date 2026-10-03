@@ -129,3 +129,27 @@ O objeto completo arm64 W=1 compilou sem avisos; a série 0014..0016 sem fuzz
 reproduziu a fonte compilada. A revisão do Claude foi conferida localmente.
 **Validação apenas no host, sem carregar no S20.** Não corrige negociação PD,
 detecção de entrada nem a causa ainda indeterminada de `online=0`.
+
+## Carregador Charging e bateria Discharging
+
+Os dois atributos usam caminhos diferentes. `max77705_get_status` decodifica
+CHG_EN e CHG_DTLS; isso não mede o saldo de corrente da bateria. Já
+`max17042_get_status` consulta `power_supply_am_i_supplied`, verifica o critério
+de carga completa e, quando a medição de corrente está habilitada, lê
+AvgCurrent. Fora do ramo Full, corrente média positiva resulta em Charging;
+zero ou negativa resulta em Discharging, mesmo com alimentação reconhecida.
+No caminho DT, `maxim,rsns-microohm` habilita essa medição.
+
+Há outra limitação no núcleo desta base: `__power_supply_am_i_supplied` conta
+o fornecedor associado, mas retorna zero quando a leitura de ONLINE falha.
+Se nenhum outro fornecedor retornar alimentação presente, o medidor recebe
+zero e informa Discharging. A ausência de fornecedor associado retorna
+ENODEV, que esse getter do medidor traduz para Unknown. Portanto, uma leitura
+isolada de `online=1` não confirma qual ramo foi usado numa consulta diferente
+do status da bateria; as leituras também não são uma captura atômica.
+
+Para distinguir os casos, uma futura coleta acompanhada precisa registrar
+associação ao fornecedor, configuração de medição, erros de leitura, corrente
+média e tendência de carga junto aos estados do carregador. Esses caminhos
+de fonte não demonstram a causa no aparelho nem justificam elevar corrente,
+desabilitar a guarda de bateria baixa ou declarar carga PD aprovada.
