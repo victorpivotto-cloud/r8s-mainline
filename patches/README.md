@@ -75,3 +75,10 @@ defines UNKNOWN for prequalification instead of returning an untouched output.
 Actual-function baseline/corrected mocks, arm64 W=1 object compilation and exact
 patch reproduction passed. **No hardware load yet; does not fix PD or charging.**
 See `docs/BATERIA-HEALTH.md` and `tests/test-max77705-health.py`.
+
+`0015-max77705-getters-read-errors.patch` propagates field-read errors from
+the input-current, charge-current and float-voltage getters before conversion.
+Real-function baseline/corrected mocks and arm64 W=1 object compilation passed;
+0014+0015 reproduced the compiled source without fuzz. **Host validation only;
+does not change setters, charging policy or PD negotiation.** See
+`tests/test-max77705-getters.py` and `docs/BATERIA-HEALTH.md`.

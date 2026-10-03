@@ -67,5 +67,38 @@ do estado observado, sem excluir regulação AICL autônoma dentro do PMIC.
 Outro getter, `max77705_get_input_current`, ignora o retorno de
 `regmap_field_read` antes de usar o resultado. Um erro pode ser apresentado
 como limite de corrente em vez de erro I/O. Esse defeito é separado do patch
-0014 e ainda não foi corrigido/testado. Uma leitura de limite não mede corrente
+0014 e é tratado no candidato 0015 abaixo. Uma leitura de limite não mede corrente
 real, capacidade da fonte ou potência negociada por PD.
+
+## Erros de leitura de limites de corrente e tensão
+
+O mesmo erro ignorado existe em `max77705_get_charge_current` e
+`max77705_get_float_voltage`. Os dois getters de corrente podem consumir saída
+não inicializada; o de tensão inicializa seu campo com zero e pode informar
+4 V como sucesso após uma falha, sem que esse seja o valor lido.
+
+O patch `0015-max77705-getters-read-errors.patch` verifica as três leituras e
+propaga o erro antes de converter dados ou escrever a saída. O dispatcher de
+propriedades já devolve diretamente esses retornos. As conversões bem-sucedidas
+e todos os setters permanecem iguais; não há ajuste de tensão/corrente ou PD.
+
+```sh
+python3 tests/test-max77705-getters.py --source /caminho/max77705_charger.c
+# Na fonte anterior ao patch 0015:
+python3 tests/test-max77705-getters.py --source /caminho/baseline.c --baseline
+```
+
+Testes das funções reais reproduziram os três erros na baseline e passaram
+na correção sob ASan/UBSan: fronteiras de conversão, EIO e timeout, uma leitura
+por chamada e saída preservada em erro. A cópia completa com 0014+0015 compilou
+como objeto arm64 W=1, sem avisos. Os patches aplicados em sequência sem fuzz
+reproduziram exatamente a fonte compilada; a fonte original foi preservada.
+A revisão do Claude sobre os trechos e a estratégia foi conferida localmente.
+**Não carregado no aparelho; causa da ausência de carga ainda não determinada.**
+
+Após a correção, consumidores precisam tratar erros de leitura em vez de
+receber valores fabricados. No núcleo usado aqui, `add_prop_uevent` ignora
+ENODEV/ENODATA, mas propaga outros erros negativos; uma falha transitória pode
+impedir a emissão desse evento de propriedades. Não converter EIO em sucesso
+para esconder isso nem usar uma falha de leitura como autorização para elevar
+o limite de corrente.

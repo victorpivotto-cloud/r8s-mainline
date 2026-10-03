@@ -1,0 +1,44 @@
+--- a/drivers/power/supply/max77705_charger.c
++++ b/drivers/power/supply/max77705_charger.c
+@@ -361,8 +361,11 @@
+ {
+ 	unsigned int reg_data;
+ 	int get_current = 0;
+-
+-	regmap_field_read(chg->rfield[MAX77705_CHG_CHGIN_LIM], &reg_data);
++	int ret;
++
++	ret = regmap_field_read(chg->rfield[MAX77705_CHG_CHGIN_LIM], &reg_data);
++	if (ret)
++		return ret;
+ 
+ 	if (reg_data <= 3)
+ 		get_current = MAX77705_CURRENT_CHGIN_MIN;
+@@ -378,8 +381,11 @@
+ 					int *val)
+ {
+ 	unsigned int reg_data;
+-
+-	regmap_field_read(chg->rfield[MAX77705_CHG_CC_LIM], &reg_data);
++	int ret;
++
++	ret = regmap_field_read(chg->rfield[MAX77705_CHG_CC_LIM], &reg_data);
++	if (ret)
++		return ret;
+ 
+ 	*val = reg_data <= 0x2 ? MAX77705_CURRENT_CHGIN_MIN : reg_data * MAX77705_CURRENT_CHG_STEP;
+ 
+@@ -406,8 +412,11 @@
+ {
+ 	unsigned int reg_data = 0;
+ 	int voltage_mv;
+-
+-	regmap_field_read(chg->rfield[MAX77705_CHG_CV_PRM], &reg_data);
++	int ret;
++
++	ret = regmap_field_read(chg->rfield[MAX77705_CHG_CV_PRM], &reg_data);
++	if (ret)
++		return ret;
+ 	voltage_mv = reg_data <= 0x04 ? reg_data * 50 + 4000 :
+ 					(reg_data - 4) * 10 + 4200;
+ 	*val = voltage_mv * 1000;
