@@ -102,3 +102,30 @@ ENODEV/ENODATA, mas propaga outros erros negativos; uma falha transitória pode
 impedir a emissão desse evento de propriedades. Não converter EIO em sucesso
 para esconder isso nem usar uma falha de leitura como autorização para elevar
 o limite de corrente.
+
+## Falso Charging com a carga desabilitada
+
+`max77705_get_status` usa `POWER_SUPPLY_CHARGE_TYPE_NONE` quando CHG_EN é
+zero. Esse valor vale 1; na enumeração de status, 1 significa `Charging`.
+O patch `0016-max77705-status-presence-errors.patch` usa `STATUS_NOT_CHARGING`
+nesse ramo. Ele também propaga erros das leituras de status, tipo de carga e
+presença de bateria antes de consumir dados ou definir a saída.
+
+`Not charging` aqui descreve o motor de carga desabilitado; não é uma medição
+do fluxo da bateria, nem uma escolha automática entre carga e descarga.
+As demais decodificações bem-sucedidas e todos os controles permanecem iguais.
+Não foi demonstrado que esse ramo produziu o estado observado no aparelho.
+
+```sh
+python3 tests/test-max77705-status.py --source /caminho/max77705_charger.c
+# Na fonte anterior ao patch 0016:
+python3 tests/test-max77705-status.py --source /caminho/baseline.c --baseline
+```
+
+O teste das funções reais reproduziu o falso Charging e os erros ignorados.
+A correção passou sob ASan/UBSan: carga desabilitada, 16 estados, combinações
+de presença, EIO/timeout em cada etapa e interrupção das leituras após erro.
+O objeto completo arm64 W=1 compilou sem avisos; a série 0014..0016 sem fuzz
+reproduziu a fonte compilada. A revisão do Claude foi conferida localmente.
+**Validação apenas no host, sem carregar no S20.** Não corrige negociação PD,
+detecção de entrada nem a causa ainda indeterminada de `online=0`.

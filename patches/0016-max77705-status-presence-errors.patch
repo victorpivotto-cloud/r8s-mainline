@@ -1,0 +1,73 @@
+--- a/drivers/power/supply/max77705_charger.c
++++ b/drivers/power/supply/max77705_charger.c
+@@ -176,12 +176,17 @@
+ 	unsigned int reg_data;
+ 	unsigned int reg_data2;
+ 	struct regmap *regmap = chg->regmap;
+-
+-	regmap_read(regmap, MAX77705_CHG_REG_INT_OK, &reg_data);
++	int ret;
++
++	ret = regmap_read(regmap, MAX77705_CHG_REG_INT_OK, &reg_data);
++	if (ret)
++		return ret;
+ 
+ 	dev_dbg(chg->dev, "CHG_INT_OK(0x%x)\n", reg_data);
+ 
+-	regmap_read(regmap, MAX77705_CHG_REG_DETAILS_00, &reg_data2);
++	ret = regmap_read(regmap, MAX77705_CHG_REG_DETAILS_00, &reg_data2);
++	if (ret)
++		return ret;
+ 
+ 	dev_dbg(chg->dev, "CHG_DETAILS00(0x%x)\n", reg_data2);
+ 
+@@ -197,14 +202,19 @@
+ {
+ 	struct regmap *regmap = chg->regmap;
+ 	unsigned int reg_data, chg_en;
+-
+-	regmap_field_read(chg->rfield[MAX77705_CHG_EN], &chg_en);
++	int ret;
++
++	ret = regmap_field_read(chg->rfield[MAX77705_CHG_EN], &chg_en);
++	if (ret)
++		return ret;
+ 	if (!chg_en) {
+ 		*val = POWER_SUPPLY_CHARGE_TYPE_NONE;
+ 		return 0;
+ 	}
+ 
+-	regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &reg_data);
++	ret = regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &reg_data);
++	if (ret)
++		return ret;
+ 	reg_data &= MAX77705_CHG_DTLS;
+ 
+ 	switch (reg_data) {
+@@ -225,14 +235,19 @@
+ {
+ 	struct regmap *regmap = chg->regmap;
+ 	unsigned int reg_data, chg_en;
+-
+-	regmap_field_read(chg->rfield[MAX77705_CHG_EN], &chg_en);
++	int ret;
++
++	ret = regmap_field_read(chg->rfield[MAX77705_CHG_EN], &chg_en);
++	if (ret)
++		return ret;
+ 	if (!chg_en) {
+-		*val = POWER_SUPPLY_CHARGE_TYPE_NONE;
+-		return 0;
+-	}
+-
+-	regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &reg_data);
++		*val = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		return 0;
++	}
++
++	ret = regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &reg_data);
++	if (ret)
++		return ret;
+ 	reg_data &= MAX77705_CHG_DTLS;
+ 
+ 	switch (reg_data) {

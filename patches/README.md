@@ -82,3 +82,10 @@ Real-function baseline/corrected mocks and arm64 W=1 object compilation passed;
 0014+0015 reproduced the compiled source without fuzz. **Host validation only;
 does not change setters, charging policy or PD negotiation.** See
 `tests/test-max77705-getters.py` and `docs/BATERIA-HEALTH.md`.
+
+`0016-max77705-status-presence-errors.patch` fixes the disabled-charger status
+enum mix-up (charge-type NONE was decoded as Charging) and propagates read
+errors in status, charge-type and battery-presence getters. Real-function
+baseline/corrected tests, arm64 W=1 compilation and exact series reproduction
+passed. **Not loaded on hardware; does not fix offline input or PD.** See
+`tests/test-max77705-status.py` and `docs/BATERIA-HEALTH.md`.
