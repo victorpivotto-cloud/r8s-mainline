@@ -153,3 +153,33 @@ associação ao fornecedor, configuração de medição, erros de leitura, corre
 média e tendência de carga junto aos estados do carregador. Esses caminhos
 de fonte não demonstram a causa no aparelho nem justificam elevar corrente,
 desabilitar a guarda de bateria baixa ou declarar carga PD aprovada.
+
+## Codificação dos limites de corrente
+
+O setter de INPUT_CURRENT_LIMIT dividia o pedido por 25 mA sem descontar
+o offset do campo. Um pedido de 1,8 A gerava código72, lido como1,825 A.
+No máximo de3,2 A, o código128 excedia o campo de7bits e podia ser mascarado
+para0, lido como100 mA. O setter de CONSTANT_CHARGE_CURRENT também reutilizava
+o teto3,2 A: com passo50 mA, código64 excedia seu campo de6bits.
+
+`0017-max77705-current-setters.patch` corrige o offset da entrada e limita
+a corrente de carga a3,15 A, maior valor representável no campo. Pedidos não
+alinhados continuam arredondados para baixo; o mínimo permanece100 mA.
+Não altera os pedidos da política de carga nem negocia PD. A codificação
+concorda com os setters do driver vendor de referência e os getters desta base.
+
+```sh
+# Após aplicar a série 0014..0017 na base documentada:
+python3 tests/test-max77705-setters.py \
+  --source /caminho/drivers/power/supply/max77705_charger.c \
+  --header /caminho/include/linux/power/max77705_charger.h
+```
+
+O teste extrai as funções reais e usa stubs de campos com máscara em bit0;
+confere6.200.019 roundtrips, limites inteiros, códigos exatos de referência,
+bits vizinhos e errosEIO/timeout sob ASan/UBSan. O stub de clamp reproduz os
+argumentos int desta base; não substitui os checks de compilação do kernel.
+Objeto arm64 W=1 compilado sem avisos; aplicação da série sem fuzz reproduziu
+exatamente fonte e header compilados. Revisão do Claude conferida localmente.
+**Somente validação no host, não carregado no S20.** Não demonstra que um
+pedido máximo ocorreu no aparelho nem determina a causa da falha com hub.

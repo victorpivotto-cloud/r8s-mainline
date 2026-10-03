@@ -89,3 +89,12 @@ errors in status, charge-type and battery-presence getters. Real-function
 baseline/corrected tests, arm64 W=1 compilation and exact series reproduction
 passed. **Not loaded on hardware; does not fix offline input or PD.** See
 `tests/test-max77705-status.py` and `docs/BATERIA-HEALTH.md`.
+
+`0017-max77705-current-setters.patch` corrects the input-limit code offset
+and clamps charge-current requests to the six-bit maximum of 3.15 A.
+It prevents one-step input-limit overshoot and maximum-code truncation.
+Actual-function tests cover round trips, exact codes, neighbouring bits and
+write errors; arm64 W=1 object compilation and exact 0014..0017 reproduction
+passed. **Host validation only; not loaded on hardware and does not implement
+PD negotiation or establish the hub failure cause.** See
+`tests/test-max77705-setters.py` and `docs/BATERIA-HEALTH.md`.

@@ -1,0 +1,45 @@
+--- a/drivers/power/supply/max77705_charger.c
++++ b/drivers/power/supply/max77705_charger.c
+@@ -162,11 +162,11 @@
+ 
+ static int max77705_set_integer(struct max77705_charger_data *chg, enum max77705_field_idx fidx,
+ 				unsigned int clamp_min, unsigned int clamp_max,
+-				unsigned int div, int val)
++				unsigned int div, unsigned int offset, int val)
+ {
+ 	unsigned int regval;
+ 
+-	regval = clamp_val(val, clamp_min, clamp_max) / div;
++	regval = clamp_val(val, clamp_min, clamp_max) / div - offset;
+ 
+ 	return regmap_field_write(chg->rfield[fidx], regval);
+ }
+@@ -489,15 +489,15 @@
+ 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+ 		err = max77705_set_integer(chg, MAX77705_CHG_CC_LIM,
+ 					   MAX77705_CURRENT_CHGIN_MIN,
+-					   MAX77705_CURRENT_CHGIN_MAX,
+-					   MAX77705_CURRENT_CHG_STEP,
++					   MAX77705_CURRENT_CHG_MAX,
++					   MAX77705_CURRENT_CHG_STEP, 0,
+ 					   val->intval);
+ 		break;
+ 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+ 		err = max77705_set_integer(chg, MAX77705_CHG_CHGIN_LIM,
+ 					   MAX77705_CURRENT_CHGIN_MIN,
+ 					   MAX77705_CURRENT_CHGIN_MAX,
+-					   MAX77705_CURRENT_CHGIN_STEP,
++					   MAX77705_CURRENT_CHGIN_STEP, 1,
+ 					   val->intval);
+ 		break;
+ 	default:
+--- a/include/linux/power/max77705_charger.h
++++ b/include/linux/power/max77705_charger.h
+@@ -128,6 +128,7 @@
+ /* uA */
+ #define MAX77705_CURRENT_CHGIN_STEP	25000
+ #define MAX77705_CURRENT_CHG_STEP	50000
++#define MAX77705_CURRENT_CHG_MAX		3150000
+ #define MAX77705_CURRENT_CHGIN_MIN	100000
+ #define MAX77705_CURRENT_CHGIN_MAX	3200000
+ 
