@@ -77,3 +77,34 @@ O ensaio ainda exige fastboot com ligação direta ao computador, reconexão
 do hub, alimentação externa conferida, leitura de enumeração sem montar ou
 escrever no pendrive e retorno ao controle em RAM. A imagem é local;
 host, carga simultânea e PD negociado continuam sem aprovação.
+
+## Habilitar carga não comprova negociação PD
+
+A rotina [`chg_init_max77705` do lk3rd](https://github.com/exynos990-mainline/lk3rd/blob/00e2a415232d8f97d35d730c66b194b7e878b06c/dev/battery/charger/chg_max77705.c)
+lê `0xB7`, escreve o valor com o bit CHG habilitado e imprime leituras de
+`0xB7` e `0xC3`. Na tabela usada pelo driver Linux, esses endereços correspondem
+a `CNFG_00` e `CNFG_12`. Essa rotina não solicita contrato PD nem configura
+limite de corrente de entrada. A implementação I2C consultada não devolve
+erro ao chamador; as mensagens impressas não bastam para validar a operação.
+Isso descreve essa rotina, sem excluir negociação em outras etapas do boot.
+
+No driver standalone, `max77705_charger_initialize` substitui o campo MODE
+por CHG|BUCK e configura outros parâmetros do carregador. A escrita de
+`MAX77705_OTG_ILIM_900`, em `CNFG_02[7:6]`, limita a **saída OTG**; não define
+a corrente de entrada CHGIN nem comprova disponibilidade de 900 mA na fonte.
+Essa função não escreve o limite de entrada nem a corrente de carga rápida.
+Os comentários sobre valores padrão não são medições dos valores efetivos;
+outros caminhos de software ou o hardware podem alterar esses campos.
+
+`max77705_get_online` lê CHGIN_OK, com propagação do erro de leitura.
+`online=0` informa que o carregador não marcou essa entrada como válida;
+não mede VBUS nem identifica a causa. `online=1` também não informa contrato,
+tensão ou potência PD. Sem IRQ, `max77705_poll_work` apenas notifica mudanças
+desse indicador. O carregador standalone e esse polling não fornecem, por
+si, a integração de CC/PD e troca de papel USB.
+
+Para qualificar periféricos com carga simultânea, ainda é necessário verificar
+separadamente contrato/alimentação de entrada, papel de dados host, enumeração
+e saldo da bateria. Não deduzir corrente segura pela capacidade nominal do
+carregador, pelo limite OTG ou pela existência de AICL. A origem de
+CHGIN_OK desassertado e o estado do controlador CC/PD continuam em aberto.
