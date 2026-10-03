@@ -62,6 +62,7 @@ de watchdog de hardware qualificado permanecem limitações.
 - [Qualificação finita](QUALIFICACAO.md).
 - [Investigação dos periféricos](PERIFERICOS-PENDENTES.md).
 - [Diagnóstico de bateria](BATERIA-HEALTH.md).
+- [Limites da referência de áudio ABOX](AUDIO-REFERENCIA-IPC.md).
 - [Configuração de rede e módulos](LACUNAS-DE-KERNEL.md).
 
 Cada usuário deve conservar sua imagem/módulos de retorno e suas configurações
