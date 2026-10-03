@@ -1,0 +1,24 @@
+--- a/drivers/power/supply/max77705_charger.c
++++ b/drivers/power/supply/max77705_charger.c
+@@ -301,8 +301,11 @@
+ {
+ 	struct regmap *regmap = chg->regmap;
+ 	unsigned int bat_dtls;
+-
+-	regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &bat_dtls);
++	int ret;
++
++	ret = regmap_read(regmap, MAX77705_CHG_REG_DETAILS_01, &bat_dtls);
++	if (ret)
++		return ret;
+ 	bat_dtls = ((bat_dtls & MAX77705_BAT_DTLS) >> MAX77705_BAT_DTLS_SHIFT);
+ 
+ 	switch (bat_dtls) {
+@@ -314,6 +317,7 @@
+ 	case MAX77705_BATTERY_PREQUALIFICATION:
+ 		dev_dbg(chg->dev, "%s: battery is okay but its voltage is low(~VPQLB)\n",
+ 			__func__);
++		*value = POWER_SUPPLY_HEALTH_UNKNOWN;
+ 		break;
+ 	case MAX77705_BATTERY_DEAD:
+ 		dev_dbg(chg->dev, "%s: battery dead\n", __func__);

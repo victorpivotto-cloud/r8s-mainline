@@ -69,3 +69,9 @@ source-function mock, patch reproduction and RAM boot passed. One normal
 no-payload transaction showed matching TX/RX sequence; freshness and timeout
 recovery remain unverified. Printing happens after ACK cleanup while the transaction mutex is
 held, so it can affect timing. This does not fix stale ACK acceptance.
+
+`0014-max77705-health-read.patch` propagates failed health-register reads and
+defines UNKNOWN for prequalification instead of returning an untouched output.
+Actual-function baseline/corrected mocks, arm64 W=1 object compilation and exact
+patch reproduction passed. **No hardware load yet; does not fix PD or charging.**
+See `docs/BATERIA-HEALTH.md` and `tests/test-max77705-health.py`.
