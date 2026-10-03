@@ -149,7 +149,25 @@ O helper retorna zero sem receber confirmação dessa operação e o switch pode
 ser ignorado no ramo `fac_water_enable`. Esse retorno não demonstra que o
 caminho foi aplicado, nem que DWC3 entrou em host ou enumerou um periférico.
 
-Próximo passo de fonte: completar confirmação dos opcodes e recuperação de IRQ, comparar
+## Confirmação dos comandos
+
+Na fila USBC, `max77705_usbc_opcode_write` enfileira o pedido e uma entrada
+de resposta, mesmo quando `read_length` é zero. O caminho de resposta passa
+por APCMD e `max77705_irq_execute`; enfileirar não equivale a confirmar o
+comando. Esse handler ignora o retorno de `max77705_i2c_opcode_read` e, após
+registrar divergência entre opcode recebido e esperado, normalmente continua
+o dispatch pelo opcode recebido. Há uma exceção para FW_OPCODE_CLEAR conforme
+a configuração. Um porte precisa validar leitura, formato e correspondência
+antes de consumir a resposta, com erro entregue ao solicitante.
+
+`max77705_i2c_opcode_write` confere o retorno da escrita em bloco, mas ignora
+o da escrita de encerramento `OPCODE_WRITE_END`. Já a verificação de prazo em
+`max77705_usbc_opcode_write` ocorre num ramo de um novo pedido; esse trecho
+não demonstra um supervisor independente para comandos pendentes. É necessário
+definir timeout, cancelamento e recuperação da fila. Esses achados descrevem
+a referência de fonte, sem demonstrar a causa da falha de alimentação no r8s.
+
+Próximo passo de fonte: completar recuperação de IRQ e fila, comparar
 as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
 Em hardware, a aprovação exige confirmação de alimentação, papel host e
 enumeração, seguida de saldo da bateria e retorno
