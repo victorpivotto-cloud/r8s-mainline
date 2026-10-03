@@ -172,3 +172,24 @@ as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
 Em hardware, a aprovação exige confirmação de alimentação, papel host e
 enumeração, seguida de saldo da bateria e retorno
 ao controle. Nenhum código CC/PD desta referência foi carregado no r8s.
+
+## Comparação com carga direta antes de testar host
+
+No kernel instalado em modo peripheral, a carga direta apresentou corrente
+líquida positiva e `online=1`. Outra configuração com hub alimentado apresentou
+corrente média negativa, `online=0` e `Unspecified failure` no carregador.
+O carregador usado na carga direta era diferente: essa comparação não isola
+o efeito do hub, e não demonstra a causa da perda da entrada válida.
+
+Para comparar, usar a mesma fonte e cabo, registrar ordem das conexões e papel
+USB real, e alterar um componente por vez. Comparar hub alimentado sem
+periférico com carga direta antes de adicionar o periférico. Coletar status,
+`online`, corrente da bateria e logs, sem alterar corrente, PMIC ou papel USB.
+Perto de carga completa, `Full` e corrente próxima de zero exigem interpretação
+conjunta; ausência de corrente positiva isoladamente não demonstra defeito.
+
+`online=0` não mede a tensão VBUS; corrente negativa não demonstra BOOST ligado.
+Em modo peripheral, ausência de enumeração não testa o funcionamento host do
+hub. Auditar também o serviço legado de VBUS, se presente: estar ativo não
+comprova o modo elétrico. Saúde em falha ou controle não confirmado impedem
+iniciar o candidato host.
