@@ -49,3 +49,23 @@ nem aprovação de carga. O atributo `online` usa outra função: leitura de INT
 com erro propagado, seguida de CHGIN_OK. Corrigir health não torna essa entrada
 válida nem estabelece o contrato PD. A alimentação pelo hub exige investigação
 e validação física próprias.
+
+## CHGIN, polling e AICL na configuração atual
+
+O nó do carregador no DT aplicado não declara interrupção. No driver, isso
+seleciona `max77705_poll_work`: lê CHGIN_OK e notifica mudanças de `online`.
+Esse polling não negocia PD nem ajusta o limite de entrada. CHGIN IRQ, quando
+presente, também apenas agenda uma notificação ao subsistema power supply.
+
+O handler AICL do código reduz o campo de corrente em um loop sem limite
+explícito de rodadas e sem verificar zero antes de decrementar o inteiro sem
+sinal. São pontos que exigem correção e contrato de limites próprios. Contudo,
+o probe registra esse handler apenas quando há IRQ; ele não é o caminho
+selecionado pelo DT atual. Isso afasta aquele loop de software como explicação
+do estado observado, sem excluir regulação AICL autônoma dentro do PMIC.
+
+Outro getter, `max77705_get_input_current`, ignora o retorno de
+`regmap_field_read` antes de usar o resultado. Um erro pode ser apresentado
+como limite de corrente em vez de erro I/O. Esse defeito é separado do patch
+0014 e ainda não foi corrigido/testado. Uma leitura de limite não mede corrente
+real, capacidade da fonte ou potência negociada por PD.
