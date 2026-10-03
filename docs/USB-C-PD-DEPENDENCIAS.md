@@ -112,10 +112,13 @@ a IRQ física é de nível baixo, com thread e ONESHOT. O handler lê INTSRC,
 consulta os grupos indicados e distribui IRQs aninhadas após aplicar máscaras.
 O grupo USBC só é processado com `cc_booting_complete`; a inicialização do
 MFD mantém esse grupo mascarado. O probe USBC posteriormente marca a conclusão
-e chama uma rotina de desmascaramento. Assim, ligar a IRQ do carregador
-standalone não fornece automaticamente os eventos CC/PD. A sequência de
-desmascaramento e a semântica de leitura/limpeza por revisão ainda precisam
-ser verificadas antes de uma implementação.
+e chama uma rotina de desmascaramento. `max77705_usbc_umask_irq` lê o registro
+do pai `0x23`, limpa o bit 3 e escreve o resultado. Ela confere o erro de
+leitura, mas ignora o retorno da escrita e não retorna um resultado ao probe.
+A flag de conclusão, sozinha, não comprova que a fonte foi desmascarada.
+Assim, ligar a IRQ do carregador standalone não fornece automaticamente os
+eventos CC/PD. A sequência completa e a semântica de leitura/limpeza por
+revisão ainda precisam ser verificadas antes de uma implementação.
 
 Para CHGIN, o demultiplexador mascara temporariamente a fonte para evitar
 interrupções contínuas; o trabalho do carregador volta a desmascará-la ao
@@ -128,7 +131,15 @@ o estado lido e a política de carga; não é apenas uma notificação de entrad
 Esses caminhos vendor não foram executados no kernel atual e não demonstram
 a causa de `online=0`.
 
-Próximo passo de fonte: completar desmascaramento USBC e trabalho MUIC, comparar
+O trabalho MUIC agendado pelo handler CCIC é `max77705_muic_handle_ccic_event`,
+em [max77705-muic.c](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/muic/max77705-muic.c).
+Sob mutex e com `is_muic_ready`, ele chama `max77705_muic_detect_dev`.
+Essa detecção lê cinco bytes de status, aborta em erro da leitura inicial,
+classifica a conexão e encaminha attach/detach e o tratamento de VBUS.
+Portanto a notificação de attach não aciona BOOST diretamente nesse trabalho;
+os handlers seguintes e a política de energia ainda precisam ser rastreados.
+
+Próximo passo de fonte: completar attach/detach MUIC e recuperação de IRQ, comparar
 as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
 Em hardware, a aprovação exige confirmação de alimentação, papel host e
 enumeração, seguida de saldo da bateria e retorno
