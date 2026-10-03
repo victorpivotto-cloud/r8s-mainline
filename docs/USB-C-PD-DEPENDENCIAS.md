@@ -189,6 +189,15 @@ detecção da entrada de saldo energético, sem comprovar potência negociada,
 capacidade do computador ou defeito do hub. O próximo comparativo deve usar
 uma fonte que sustente a carga direta, preservando fonte e cabo entre etapas.
 
+Com o carregador USB-C que sustentava a carga direta, outra comparação
+observou corrente média positiva direto e entrada `online=1`/`Good` também
+através do hub sem periférico. Porém três leituras em 20 segundos através do
+hub mantiveram corrente média negativa, com bateria perto de carga completa.
+Portanto o resultado do computador não deve ser generalizado como perda
+permanente da entrada com qualquer fonte. Entrada reconhecida ainda não
+aprova saldo energético ou host de dados; o retorno à ligação direta é
+necessário para conferir efeito temporal e comportamento perto de `Full`.
+
 Para comparar, usar a mesma fonte e cabo, registrar ordem das conexões e papel
 USB real, e alterar um componente por vez. Comparar hub alimentado sem
 periférico com carga direta antes de adicionar o periférico. Coletar status,
