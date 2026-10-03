@@ -181,6 +181,14 @@ corrente média negativa, `online=0` e `Unspecified failure` no carregador.
 O carregador usado na carga direta era diferente: essa comparação não isola
 o efeito do hub, e não demonstra a causa da perda da entrada válida.
 
+Um comparativo posterior manteve a mesma porta USB-C do computador e o cabo:
+através da entrada PD do hub, sem periférico, `online=0`; diretamente no
+telefone, `online=1` e saúde do carregador `Good`. A corrente média da bateria
+continuou negativa após estabilização também na ligação direta. Isso distingue
+detecção da entrada de saldo energético, sem comprovar potência negociada,
+capacidade do computador ou defeito do hub. O próximo comparativo deve usar
+uma fonte que sustente a carga direta, preservando fonte e cabo entre etapas.
+
 Para comparar, usar a mesma fonte e cabo, registrar ordem das conexões e papel
 USB real, e alterar um componente por vez. Comparar hub alimentado sem
 periférico com carga direta antes de adicionar o periférico. Coletar status,
