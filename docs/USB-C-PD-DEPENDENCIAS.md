@@ -99,7 +99,36 @@ evidência confiável do estado, conferir classificação/ordem das notificaçõ
 e os demais controles de entrada. Não escrever CNFG_12 inteiro nem aumentar
 corrente para testar essa hipótese.
 
-Próximo passo de fonte: completar transporte/IRQ e trabalho MUIC, comparar
+## Transporte e interrupções da referência
+
+O [MFD max77705.c](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/mfd/max77705.c)
+cria clientes I2C auxiliares para MUIC/USBC, carregador e fuel gauge,
+compartilhando a estrutura do pai. Também inicializa o controlador de IRQs
+antes dos filhos MFD. Esse probe inclui um caminho condicional de preparação
+de firmware; ele não faz parte de uma proposta de porte mínimo.
+
+Em [max77705-irq.c](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/mfd/max77705-irq.c),
+a IRQ física é de nível baixo, com thread e ONESHOT. O handler lê INTSRC,
+consulta os grupos indicados e distribui IRQs aninhadas após aplicar máscaras.
+O grupo USBC só é processado com `cc_booting_complete`; a inicialização do
+MFD mantém esse grupo mascarado. O probe USBC posteriormente marca a conclusão
+e chama uma rotina de desmascaramento. Assim, ligar a IRQ do carregador
+standalone não fornece automaticamente os eventos CC/PD. A sequência de
+desmascaramento e a semântica de leitura/limpeza por revisão ainda precisam
+ser verificadas antes de uma implementação.
+
+Para CHGIN, o demultiplexador mascara temporariamente a fonte para evitar
+interrupções contínuas; o trabalho do carregador volta a desmascará-la ao
+terminar. `max77705_chgin_isr_work` espera leituras consecutivas estáveis,
+com pausas de 100 ms e contador reiniciado a cada mudança. Não há prazo total
+nesse loop, e os retornos de leitura não são conferidos. Um porte precisa de
+prazo, tratamento de erro e recuperação das máscaras em todos os caminhos.
+O trabalho AICL também altera corrente e pode reagendar a si próprio conforme
+o estado lido e a política de carga; não é apenas uma notificação de entrada.
+Esses caminhos vendor não foram executados no kernel atual e não demonstram
+a causa de `online=0`.
+
+Próximo passo de fonte: completar desmascaramento USBC e trabalho MUIC, comparar
 as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
 Em hardware, a aprovação exige confirmação de alimentação, papel host e
 enumeração, seguida de saldo da bateria e retorno
