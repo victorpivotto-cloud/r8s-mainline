@@ -53,3 +53,27 @@ A propriedade não comprova o clock físico e não ajusta automaticamente DTOUT.
 Próximo ensaio: confirmar clock/revisão, medir registradores em host, comparar
 imagem controle/candidata com mesmo dispositivo/cabo e VBUS correto, conservar
 acesso Wi-Fi e retorno por imagem RAM. Exige periférico físico conhecido.
+
+## Hub alimentado e papel USB
+
+Foi disponibilizado um hub Orico PW11-9P, carregador Samsung na entrada PD
+e pendrive em uma porta USB. O usuário confirmou alimentação pelo hub;
+as leituras do Linux variaram entre `online=1/Full` e `online=0/Discharging`.
+Isso não mede potência negociada nem confirma alimentação contínua.
+
+O controle atual declara `dr_mode = "peripheral"`, com DWC3 em `device` e
+barramento host vazio. Em `dwc3_mode_write`, uma escrita em debugfs retorna
+sucesso sem trocar o papel quando `dr_mode` não é OTG. Portanto escrever
+`host` nessa interface não é um teste válido nesta configuração.
+
+Foi preparado, **sem carregar**, um candidato baseado no mesmo kernel e
+ramdisk do controle: altera somente o papel do DT para `host`, sem ajustes
+de temporização, e acrescenta `systemd.mask=otg-vbus.service` à linha de
+comando desse boot. A máscara é temporária e evita o serviço legado ligar
+OTG/BOOST enquanto o ensaio usa alimentação externa. Nenhuma configuração
+instalada, partição ou registrador do carregador foi alterado.
+
+O ensaio ainda exige fastboot com ligação direta ao computador, reconexão
+do hub, alimentação externa conferida, leitura de enumeração sem montar ou
+escrever no pendrive e retorno ao controle em RAM. A imagem é local;
+host, carga simultânea e PD negociado continuam sem aprovação.
