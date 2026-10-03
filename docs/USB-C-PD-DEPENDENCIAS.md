@@ -139,7 +139,17 @@ classifica a conexão e encaminha attach/detach e o tratamento de VBUS.
 Portanto a notificação de attach não aciona BOOST diretamente nesse trabalho;
 os handlers seguintes e a política de energia ainda precisam ser rastreados.
 
-Próximo passo de fonte: completar attach/detach MUIC e recuperação de IRQ, comparar
+`max77705_muic_init_detect` marca `is_muic_ready` sob o mesmo mutex e chama
+a detecção inicial. Portanto o teste de ready no worker não demonstra, por
+si, perda do estado inicial. A ordem de registro dos notificadores e a chegada
+de eventos concorrentes ainda exigem análise; não há defeito confirmado aqui.
+No ramo OTG de attach, `com_to_usb_ap` solicita `COM_USB` através de
+`max77705_switch_path`, que envia `COMMAND_CONTROL1_WRITE` pela fila USBC.
+O helper retorna zero sem receber confirmação dessa operação e o switch pode
+ser ignorado no ramo `fac_water_enable`. Esse retorno não demonstra que o
+caminho foi aplicado, nem que DWC3 entrou em host ou enumerou um periférico.
+
+Próximo passo de fonte: completar confirmação dos opcodes e recuperação de IRQ, comparar
 as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
 Em hardware, a aprovação exige confirmação de alimentação, papel host e
 enumeração, seguida de saldo da bateria e retorno
