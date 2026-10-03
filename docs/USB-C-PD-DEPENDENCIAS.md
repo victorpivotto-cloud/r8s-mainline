@@ -68,9 +68,39 @@ consome POWER_STATUS e informações de PDO em uma política própria; a rotina
 de corrente escreve propriedades do carregador e inclui tratamento térmico.
 Ela não é um ajuste de corrente que possa ser copiado isoladamente.
 
-Próximo passo de fonte: mapear o estado de energia/reserva, o trabalho MUIC
-e as dependências de transporte/IRQ; comparar as interfaces vendor com as do
-kernel base e definir o escopo mínimo do porte. Em hardware, a aprovação exige
-confirmação de
-alimentação, papel host e enumeração, seguida de saldo da bateria e retorno
+## Papel de energia, reserva e seleção da entrada
+
+Em `max77705_ccstat_irq_handler`, estados CC SINK/SOURCE geram eventos
+`NOTIFY_EVENT_POWER_SOURCE` separados do evento DFP. `extra_notify_state`
+consome esses eventos para manter o papel de energia; outro evento mantém
+`reserve_vbus_booster`. `max77705_vbus_turn_on_ctrl` pode reservar o pedido
+durante o atraso de boot e cancelar a reserva nos caminhos de desligamento
+que chegam a essa lógica; ramos de auto-mode/bloqueio podem retornar antes.
+Esse encadeamento explica a condição SOURCE+reserva do caminho OFF; não é
+uma autorização para ligar BOOST quando o aparelho recebe energia do hub.
+
+O ramo CC SINK também dispara a propriedade vendor CHGINSEL. No
+[max77705_charger.c](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/battery_v2/max77705_charger.c),
+o handler usa **`charger->cable_type` armazenado**, ignorando `val->intval`.
+Assim, passar valor 1 não força, por si, o caminho cabeado. A função
+`max77705_change_charge_path` solicita bit 5 de CNFG_12 igual a zero para
+tipos classificados como wireless e igual a um para os demais.
+O [header vendor](https://github.com/ExtremeXT/android_kernel_samsung_exynos990/blob/69515fbb7a4395898c05a8624f76a12afbac11c5/drivers/battery_v2/include/charger/max77705_charger.h)
+define a máscara como `0x20`; a função de atualização no MFD preserva os
+outros bits. O helper de caminho ignora os retornos de atualização/leitura,
+portanto a mensagem de readback não comprova sucesso da operação.
+
+Na inicialização standalone consultada, os campos CNFG_12 configurados são
+DISKIP `[0]`, WCIN `[2:1]` e VCHGIN `[4:3]`; essas escritas não definem bit 5.
+Essa diferença fornece uma hipótese de configuração herdada, sem confirmar
+o valor atual, a seleção física efetiva ou a causa de `online=0`. CHGIN_OK
+é lido em outro registro. Antes de propor uma correção, é necessário obter
+evidência confiável do estado, conferir classificação/ordem das notificações
+e os demais controles de entrada. Não escrever CNFG_12 inteiro nem aumentar
+corrente para testar essa hipótese.
+
+Próximo passo de fonte: completar transporte/IRQ e trabalho MUIC, comparar
+as interfaces vendor com as do kernel base e definir o escopo mínimo do porte.
+Em hardware, a aprovação exige confirmação de alimentação, papel host e
+enumeração, seguida de saldo da bateria e retorno
 ao controle. Nenhum código CC/PD desta referência foi carregado no r8s.
